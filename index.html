@@ -263,6 +263,7 @@ form.f .check input{width:auto}
       <button data-view="absences">Abwesenheiten</button>
       <button data-view="employees">Mitarbeiter</button>
       <button data-view="logins">Logins</button>
+      <button data-view="hours">Stunden</button>
       <button data-view="settings">Einstellungen</button>
     </nav>
     <div class="weeknav" id="weeknav">
@@ -325,7 +326,7 @@ let selDay = Math.min((new Date().getDay() + 6) % 7, 4);
 let view = 'plan';
 let lastSeen = null;
 let onlyWorking = false;
-const S = { groups: [], employees: [], shifts: [], absences: [], absPublic: [], roles: [], settings: {}, profiles: [], absList: [] };
+const S = { groups: [], employees: [], shifts: [], absences: [], absPublic: [], roles: [], settings: {}, profiles: [], absList: [], hoursRange: null, hoursShifts: [], hoursAbs: [] };
 
 try { lastSeen = +localStorage.getItem('mr_lastSeen') || null; onlyWorking = localStorage.getItem('mr_onlyWorking') === '1'; } catch (e) { }
 
@@ -423,12 +424,20 @@ async function loadAll() {
     S.absPublic = isAdmin ? [] : ((res[6] && res[6].data) || []);
     if (isAdmin && view === 'logins') await loadProfiles();
     if (view === 'absences') await loadAbsList();
+    if (isAdmin && view === 'hours') await loadHours();
     render();
   } catch (e) { console.error(e); toast('Fehler: ' + errMsg(e), 5000); }
   loading = false;
   if (loadAgain) { loadAgain = false; loadAll(); }
 }
 async function loadProfiles() { const { data } = await sb.from('profiles').select('*').order('display_name'); S.profiles = data || []; }
+function monthRange(offset) { const d = new Date(); const from = new Date(d.getFullYear(), d.getMonth() + offset, 1); const to = new Date(d.getFullYear(), d.getMonth() + offset + 1, 0); return { from: iso(from), to: iso(to) }; }
+async function loadHours() {
+  const r = S.hoursRange || (S.hoursRange = monthRange(0));
+  const [a, b] = await Promise.all([sb.from('shifts').select('*').gte('day', r.from).lte('day', r.to), sb.from('absences').select('*').lte('from_day', r.to).gte('to_day', r.from)]);
+  if (a.error || b.error) toast('Fehler beim Laden: ' + errMsg(a.error || b.error), 5000);
+  S.hoursShifts = a.data || []; S.hoursAbs = b.data || [];
+}
 async function loadAbsList() { const { data } = await sb.from('absences').select('*').gte('to_day', iso(addDays(new Date(), -60))).order('from_day', { ascending: false }); S.absList = data || []; }
 
 let reloadTimer = null;
@@ -496,6 +505,7 @@ function render() {
   else if (view === 'employees') c.innerHTML = renderEmployees();
   else if (view === 'logins') c.innerHTML = renderLogins();
   else if (view === 'settings') c.innerHTML = renderSettings();
+  else if (view === 'hours') c.innerHTML = renderHours();
 }
 
 function cellHtml(emp, d) {
@@ -531,7 +541,7 @@ function renderPlan(D) {
   h += renderMyWeek(D);
   h += `<div class="daylist">${renderDayList(D[selDay], secs)}</div>`;
   h += `<div class="gridwrap"><table class="grid">${renderGrid(D, secs)}</table></div>`;
-  h += `<div class="planactions admin-only"><button class="ghost" data-action="copyweek">Woche kopieren…</button><button class="ghost" data-action="print">Drucken</button></div>`;
+  h += `<div class="planactions admin-only"><button class="ghost" data-action="copyweek">Woche kopieren…</button><button class="ghost" data-action="print">Drucken</button><span style="flex:1"></span><button class="danger" data-action="clearweek">Woche leeren…</button></div>`;
   if (!S.employees.length) h += `<div class="card">Noch keine Mitarbeiter angelegt.${isAdmin ? ' Gehe zu „Mitarbeiter“, um zu starten.' : ''}</div>`;
   return h;
 }
@@ -642,8 +652,8 @@ function renderEmployees() {
   for (const e of S.employees) { const g = S.groups.find(x => x.id === e.group_id); h += `<tr data-action="editemp" data-id="${e.id}"><td><b>${e.color ? `<span class="sw" style="background:${esc(e.color)}"></span>` : ''}${esc(e.name)}</b></td><td>${g ? `<span class="sw" style="background:${esc(g.color)}"></span>${esc(g.name)}` : '<small>–</small>'}</td><td>${fmtH(+e.weekly_hours || 0)}</td><td>${e.sort_order}</td><td>${e.active === false ? '<small>nein</small>' : 'ja'}</td></tr>`; }
   h += `</tbody></table></div>`;
   h += `<div class="card"><h2>Gruppen <span class="cnt">(${S.groups.length})</span></h2><div class="toolbar"><button class="primary" data-action="newgroup">+ Neue Gruppe</button></div>
-  <table class="list"><thead><tr><th>Name</th><th>Farbe</th><th>Reihenfolge</th><th>Personen</th></tr></thead><tbody>`;
-  for (const g of S.groups) h += `<tr data-action="editgroup" data-id="${g.id}"><td><b>${esc(g.name)}</b></td><td><span class="sw" style="background:${esc(g.color)}"></span>${esc(g.color)}</td><td>${g.sort_order}</td><td>${S.employees.filter(e => e.group_id === g.id).length}</td></tr>`;
+  <table class="list"><thead><tr><th>Name</th><th>Farbe</th><th>Reihenfolge</th><th>Personen</th><th>Für Mitarbeiter sichtbar</th></tr></thead><tbody>`;
+  for (const g of S.groups) h += `<tr data-action="editgroup" data-id="${g.id}"><td><b>${esc(g.name)}</b></td><td><span class="sw" style="background:${esc(g.color)}"></span>${esc(g.color)}</td><td>${g.sort_order}</td><td>${S.employees.filter(e => e.group_id === g.id).length}</td><td>${g.staff_visible === false ? '<b style="color:var(--red)">nein – nur Admins</b>' : 'ja'}</td></tr>`;
   h += '</tbody></table></div><p class="help">Auf eine Zeile klicken, um sie zu bearbeiten. Die Reihenfolge bestimmt die Sortierung im Plan (kleine Zahl = oben).</p>';
   return h;
 }
@@ -660,6 +670,53 @@ function renderLogins() {
     h += `<tr><td><b>${esc(p.display_name || p.user_id)}</b>${me ? ' <small>(du)</small>' : ''}</td><td><select data-action="linkprofile" data-uid="${p.user_id}"><option value="">– nicht zugeordnet –</option>${S.employees.map(e => `<option value="${e.id}" ${p.employee_id === e.id ? 'selected' : ''}>${esc(e.name)}</option>`).join('')}</select></td><td><input type="checkbox" data-action="setadmin" data-uid="${p.user_id}" ${p.is_admin ? 'checked' : ''} ${me ? 'disabled title="Du kannst dir selbst das Admin-Recht nicht entziehen"' : ''}></td></tr>`;
   }
   return h + '</tbody></table></div>';
+}
+
+/* ---------- Stunden (Auswertung) ---------- */
+function hoursReport() {
+  const r = S.hoursRange; const n = Math.min(7, Math.max(5, +S.settings.days_per_week || 5));
+  const days = []; for (let d = parseISO(r.from); iso(d) <= r.to; d = addDays(d, 1)) days.push(d);
+  const workDays = days.filter(d => ((d.getDay() + 6) % 7) < n);
+  const weeks = Array.from(new Set(workDays.map(d => iso(mondayOf(d))))).sort();
+  const absAt = (empId, day) => S.hoursAbs.find(x => x.employee_id === empId && x.from_day <= day && x.to_day >= day);
+  const rows = [];
+  for (const e of S.employees.filter(x => x.active !== false)) {
+    const row = { e, g: S.groups.find(g => g.id === e.group_id), total: 0, days: 0, weeks: {}, abs: { urlaub: 0, krank: 0, formatioun: 0, frei: 0, sonstiges: 0 } };
+    for (const s of S.hoursShifts.filter(x => x.employee_id === e.id)) {
+      if (absAt(e.id, s.day) || !hasTimes(s)) continue;
+      const h = shiftHours(s); row.total += h; row.days++;
+      const wk = iso(mondayOf(parseISO(s.day))); row.weeks[wk] = (row.weeks[wk] || 0) + h;
+    }
+    for (const d of workDays) { const a = absAt(e.id, iso(d)); if (a) row.abs[a.kind] = (row.abs[a.kind] || 0) + 1; }
+    row.soll = (+e.weekly_hours || 0) / n * workDays.length;
+    rows.push(row);
+  }
+  return { rows, weeks, workDays, n };
+}
+function renderHours() {
+  const r = S.hoursRange || monthRange(0); S.hoursRange = r;
+  const { rows, weeks, workDays } = hoursReport();
+  const showWeeks = weeks.length >= 2 && weeks.length <= 8;
+  const sum = { total: 0, days: 0, soll: 0, weeks: {}, abs: { urlaub: 0, krank: 0, formatioun: 0, frei: 0, sonstiges: 0 } };
+  for (const x of rows) { sum.total += x.total; sum.days += x.days; sum.soll += x.soll; for (const k in x.abs) sum.abs[k] += x.abs[k]; for (const w of weeks) sum.weeks[w] = (sum.weeks[w] || 0) + (x.weeks[w] || 0); }
+  const diff = v => { const d = Math.round(v * 100) / 100; return `<span style="color:${d > 0.01 ? 'var(--red)' : d < -0.01 ? 'var(--orange)' : 'inherit'}">${d > 0 ? '+' : ''}${fmtH(d)}</span>`; };
+  let h = `<div class="card"><h2>Stunden laut Plan <span class="cnt">${fmtDS(r.from)} – ${fmtDS(r.to)} · ${workDays.length} Arbeitstage</span></h2>
+    <form class="f" id="fHours"><div class="frow"><label>Von</label><input type="date" name="from" value="${esc(r.from)}" required><label style="min-width:auto">bis</label><input type="date" name="to" value="${esc(r.to)}" required><button class="primary" type="submit">Anzeigen</button></div>
+    <div class="chips"><button type="button" data-action="hoursrange" data-r="week">Diese Woche</button><button type="button" data-action="hoursrange" data-r="month">Dieser Monat</button><button type="button" data-action="hoursrange" data-r="lastmonth">Letzter Monat</button><button type="button" data-action="hoursrange" data-r="nextmonth">Nächster Monat</button><span class="spacer"></span><button type="button" data-action="hourscsv">Als CSV speichern</button></div></form>
+    <div style="overflow:auto"><table class="list" id="tblHours"><thead><tr><th>Name</th><th>Gruppe</th>${showWeeks ? weeks.map(w => `<th title="ab ${fmtDS(w)}">KW ${isoWeek(parseISO(w))}</th>`).join('') : ''}<th>Stunden</th><th>Tage</th><th>Congé</th><th>Krank</th><th>Formatioun</th><th>Fräi/Sonst.</th><th>Soll</th><th>Differenz</th></tr></thead><tbody>`;
+  for (const x of rows) h += `<tr><td><b>${esc(x.e.name)}</b></td><td>${x.g ? esc(x.g.name) : '–'}</td>${showWeeks ? weeks.map(w => `<td>${x.weeks[w] ? fmtH(x.weeks[w]) : ''}</td>`).join('') : ''}<td><b>${fmtH(x.total)}</b></td><td>${x.days}</td><td>${x.abs.urlaub || ''}</td><td>${x.abs.krank || ''}</td><td>${x.abs.formatioun || ''}</td><td>${(x.abs.frei + x.abs.sonstiges) || ''}</td><td>${x.soll ? fmtH(x.soll) : ''}</td><td>${x.soll ? diff(x.total - x.soll) : ''}</td></tr>`;
+  h += `<tr style="font-weight:700;background:#f7f9fb"><td>Summe</td><td></td>${showWeeks ? weeks.map(w => `<td>${fmtH(sum.weeks[w] || 0)}</td>`).join('') : ''}<td>${fmtH(sum.total)}</td><td>${sum.days}</td><td>${sum.abs.urlaub || ''}</td><td>${sum.abs.krank || ''}</td><td>${sum.abs.formatioun || ''}</td><td>${(sum.abs.frei + sum.abs.sonstiges) || ''}</td><td>${fmtH(sum.soll)}</td><td>${diff(sum.total - sum.soll)}</td></tr></tbody></table></div></div>
+    <p class="help">Stunden = geplante Zeiten laut Plan (Bis − Von, ohne Pausenabzug), Tage mit Abwesenheit zählen 0. Tage = Tage mit mindestens einem Dienst. Abwesenheitsspalten zählen Arbeitstage im Zeitraum. Soll = Std./Woche der Person anteilig auf die Arbeitstage des Zeitraums. Differenz rot = mehr als Soll, orange = weniger.</p>`;
+  return h;
+}
+function hoursCsv() {
+  const r = S.hoursRange; const { rows, weeks } = hoursReport();
+  const head = ['Name', 'Gruppe', ...weeks.map(w => 'KW ' + isoWeek(parseISO(w))), 'Stunden', 'Tage', 'Congé', 'Krank', 'Formatioun', 'Fräi/Sonstiges', 'Soll', 'Differenz'];
+  const num = v => String(Math.round(v * 100) / 100).replace('.', ',');
+  const lines = [head.join(';')];
+  for (const x of rows) lines.push([x.e.name, x.g ? x.g.name : '', ...weeks.map(w => x.weeks[w] ? num(x.weeks[w]) : ''), num(x.total), x.days, x.abs.urlaub || '', x.abs.krank || '', x.abs.formatioun || '', (x.abs.frei + x.abs.sonstiges) || '', x.soll ? num(x.soll) : '', x.soll ? num(x.total - x.soll) : ''].map(v => `"${String(v).replace(/"/g, '""')}"`).join(';'));
+  const blob = new Blob(['\ufeff' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `stunden_${r.from}_${r.to}.csv`; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
 }
 
 /* ---------- Einstellungen ---------- */
@@ -772,15 +829,16 @@ function openEmployeeEditor(id) {
 }
 
 function openGroupEditor(id) {
-  const g = id ? S.groups.find(x => x.id === id) : { name: '', color: '#c7d0dd', sort_order: (Math.max(0, ...S.groups.map(x => x.sort_order || 0)) + 1) };
+  const g = id ? S.groups.find(x => x.id === id) : { name: '', color: '#c7d0dd', sort_order: (Math.max(0, ...S.groups.map(x => x.sort_order || 0)) + 1), staff_visible: true };
   openModal(`<h3>${id ? 'Gruppe bearbeiten' : 'Neue Gruppe'}</h3><form class="f" id="fGroup">
     <div class="frow"><label>Name</label><input type="text" name="name" value="${esc(g.name)}" required></div>
     <div class="frow"><label>Farbe</label><input type="color" name="color" value="${esc(g.color)}"><small>helle Farben sind am besten lesbar</small></div>
     <div class="frow"><label>Reihenfolge</label><input type="number" name="sort_order" step="1" value="${esc(g.sort_order)}"></div>
+    <label class="check"><input type="checkbox" name="staff_visible" ${g.staff_visible === false ? '' : 'checked'}> Für Mitarbeiter sichtbar (ohne Haken sehen nur Admins diese Gruppe und ihre Dienste)</label>
     <div class="actions"><button class="primary" type="submit">Speichern</button><span class="spacer"></span>${id ? `<button type="button" class="danger" data-action="delgroup" data-id="${id}">Löschen</button>` : ''}<button type="button" class="ghost" data-action="closemodal">Abbrechen</button></div></form>`);
   $('#fGroup').addEventListener('submit', async ev => {
     ev.preventDefault(); const d = formData(ev.target);
-    const row = { name: d.name, color: d.color, sort_order: +d.sort_order || 0 };
+    const row = { name: d.name, color: d.color, sort_order: +d.sort_order || 0, staff_visible: ev.target.staff_visible.checked };
     const { error } = id ? await sb.from('groups').update(row).eq('id', id) : await sb.from('groups').insert(row);
     if (error) return toast('Speichern fehlgeschlagen: ' + errMsg(error), 5000);
     closeModal(); toast('Gespeichert'); loadAll();
@@ -864,6 +922,9 @@ document.addEventListener('click', async e => {
   else if (a === 'editgroup') openGroupEditor(+el.dataset.id);
   else if (a === 'delgroup') { if (confirm('Gruppe löschen? Die Mitarbeiter bleiben erhalten (ohne Gruppe).')) { const { error } = await sb.from('groups').delete().eq('id', +el.dataset.id); if (error) return toast('Löschen fehlgeschlagen: ' + errMsg(error), 5000); closeModal(); toast('Gelöscht'); loadAll(); } }
   else if (a === 'copyweek') openCopyWeek();
+  else if (a === 'clearweek') { if (confirm(`Alle Dienste sowie Accueil/Schluss der KW ${isoWeek(weekStart)} (${fmtD(weekStart)} – ${fmtDY(addDays(weekStart, 6))}) löschen? Abwesenheiten bleiben erhalten. Das kann nicht rückgängig gemacht werden.`)) { const f = iso(weekStart), t = iso(addDays(weekStart, 6)); const d1 = await sb.from('shifts').delete().gte('day', f).lte('day', t); const d2 = await sb.from('day_roles').delete().gte('day', f).lte('day', t); if (d1.error || d2.error) return toast('Löschen fehlgeschlagen: ' + errMsg(d1.error || d2.error), 5000); toast('Woche geleert'); loadAll(); } }
+  else if (a === 'hoursrange') { const k = el.dataset.r; if (k === 'week') S.hoursRange = { from: iso(weekStart), to: iso(addDays(weekStart, days().length - 1)) }; else if (k === 'month') S.hoursRange = monthRange(0); else if (k === 'lastmonth') S.hoursRange = monthRange(-1); else if (k === 'nextmonth') S.hoursRange = monthRange(1); loadAll(); }
+  else if (a === 'hourscsv') hoursCsv();
   else if (a === 'print') window.print();
   else if (a === 'closemodal') closeModal();
   else if (a === 'changepw') openChangePw();
@@ -882,6 +943,7 @@ document.addEventListener('change', async e => {
 });
 
 document.addEventListener('submit', async e => {
+  if (e.target.id === 'fHours') { e.preventDefault(); const d = formData(e.target); if (!d.from || !d.to || d.to < d.from) return toast('„Bis“ darf nicht vor „Von“ liegen.'); S.hoursRange = { from: d.from, to: d.to }; loadAll(); return; }
   if (e.target.id !== 'fSettings') return;
   e.preventDefault(); const d = formData(e.target);
   const rows = ['title', 'early_time', 'late_time', 'warn_time', 'days_per_week', 'change_days', 'invite_code', 'hours_visibility'].map(k => ({ key: k, value: d[k] ?? '' }));

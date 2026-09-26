@@ -271,6 +271,7 @@ form.f .check input{width:auto}
       <div class="wl" id="weekLabel"></div>
       <button class="nav" id="nextWeek" title="Nächste Woche">›</button>
       <button class="today" id="todayWeek">Heute</button>
+      <button class="today" id="btnPdf" title="Diese Woche als PDF speichern">PDF</button>
     </div>
   </header>
   <main id="content"></main>
@@ -719,6 +720,85 @@ function hoursCsv() {
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `stunden_${r.from}_${r.to}.csv`; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
 }
 
+/* ---------- PDF-Export der Woche ---------- */
+const PDF_LIBS = ['https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js', 'https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.4/dist/jspdf.plugin.autotable.min.js'];
+function loadScript(src) { return new Promise((res, rej) => { const el = document.createElement('script'); el.src = src; el.onload = res; el.onerror = () => rej(new Error('Laden fehlgeschlagen: ' + src)); document.head.appendChild(el); }); }
+async function loadPdfLibs() {
+  if (!(window.jspdf && window.jspdf.jsPDF)) await loadScript(PDF_LIBS[0]);
+  if (!window.jspdf.jsPDF.API.autoTable) await loadScript(PDF_LIBS[1]);
+}
+function hexRgb(hex) { const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || '').trim()); if (!m) return [229, 231, 235]; const n = parseInt(m[1], 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; }
+const PDF_COL = { red: [208, 2, 27], orange: [233, 113, 50], text: [27, 36, 48], note: [61, 74, 92], acc: [21, 96, 130], schl: [14, 40, 65] };
+const ABS_COL = { urlaub: [[251, 213, 213], [138, 28, 28]], krank: [[251, 213, 213], [138, 28, 28]], formatioun: [[255, 224, 179], [122, 75, 0]], frei: [[229, 231, 235], [75, 85, 99]], sonstiges: [[232, 220, 242], [74, 43, 106]], x: [[232, 220, 242], [74, 43, 106]] };
+function pdfCellInfo(emp, d) {
+  const s = shiftOf(emp.id, d.iso); const a = absOf(emp.id, d.iso); const lines = [];
+  if (a) { const k = a.known ? a.kind : 'x'; const label = a.known ? (KINDS[a.kind] || 'Abwesend') : 'Abwesend'; const col = ABS_COL[k] || ABS_COL.x; return { abs: true, absColor: col[0], absText: col[1], text: label + (a.known && a.note ? '\n' + a.note : ''), lines }; }
+  if (s) {
+    const blocks = [[s.start1, s.end1], [s.start2, s.end2]].filter(b => b[0] && b[1]).sort((x, y) => mins(x[0]) - mins(y[0]));
+    for (const [st, en] of blocks) { const cs = timeCls(st, 'start'), ce = timeCls(en, 'end'); lines.push({ segs: [{ t: fmtT(st), color: cs ? PDF_COL.red : null, bold: true }, { t: '–' }, { t: fmtT(en), color: ce === 'warn' ? PDF_COL.orange : ce ? PDF_COL.red : null, bold: true }] }); }
+    if (s.note) lines.push({ segs: [{ t: String(s.note).toUpperCase(), color: PDF_COL.note, small: true }] });
+  }
+  const acc = roleOf(d.iso, 'accueil'), schl = roleOf(d.iso, 'schluss');
+  if (acc && acc.id === emp.id) lines.push({ segs: [{ t: '» Accueil', color: PDF_COL.acc, bold: true, small: true }] });
+  if (schl && schl.id === emp.id) lines.push({ segs: [{ t: '» Schluss', color: PDF_COL.schl, bold: true, small: true }] });
+  return { abs: false, lines, text: lines.map(l => l.segs.map(x => x.t).join('')).join('\n') };
+}
+function pdfDrawLines(doc, cell, lines, fs) {
+  const k = doc.internal.scaleFactor; const lh = fs * 1.15 / k;
+  const inner = cell.height - cell.padding('top') - cell.padding('bottom');
+  let y = cell.y + cell.padding('top') + Math.max(0, (inner - lines.length * lh) / 2);
+  for (const line of lines) {
+    let x = cell.x + cell.padding('left');
+    for (const sg of line.segs) { doc.setFontSize(sg.small ? fs - 1 : fs); doc.setFont('helvetica', sg.bold ? 'bold' : 'normal'); const c = sg.color || PDF_COL.text; doc.setTextColor(c[0], c[1], c[2]); doc.text(sg.t, x, y + (sg.small ? 0.25 : 0), { baseline: 'top' }); x += doc.getTextWidth(sg.t); }
+    y += lh;
+  }
+  doc.setFontSize(fs); doc.setFont('helvetica', 'normal'); doc.setTextColor(0, 0, 0);
+}
+async function exportWeekPdf() {
+  if (!S.employees.length) return toast('Keine Daten für den PDF-Export.');
+  toast('PDF wird erstellt…', 2500);
+  try { await loadPdfLibs(); } catch (e) { return toast('PDF-Funktion konnte nicht geladen werden. Internetverbindung prüfen und erneut versuchen.', 6000); }
+  const { jsPDF } = window.jspdf; const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+  const D = days(); const secs = sections(); const showH = hoursColumn(); const fs = 7.5; const nCols = 1 + D.length + (showH ? 1 : 0);
+  const now = new Date();
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(13); doc.setTextColor(14, 40, 65);
+  doc.text(`${S.settings.title || 'Schaffplang'} – KW ${isoWeek(weekStart)} (${fmtD(weekStart)} – ${fmtDY(addDays(weekStart, D.length - 1))})`, 10, 11);
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(110, 110, 110);
+  doc.text(`Stand: ${fmtDY(now)} ${pad2(now.getHours())}:${pad2(now.getMinutes())}`, 287, 11, { align: 'right' }); doc.setTextColor(0, 0, 0);
+  const head = [['Name', ...D.map(d => `${d.label} ${fmtD(d.date)}`), ...(showH ? ['Std.'] : [])]];
+  const body = [], meta = [];
+  for (const { g, emps } of secs) {
+    body.push([{ content: g.name, colSpan: nCols }]); meta.push({ type: 'grp', g });
+    for (const e of emps) {
+      const info = D.map(d => pdfCellInfo(e, d)); const row = [e.name, ...info.map(c => c.text)];
+      if (showH) { const wh = weekHours(e), t = +e.weekly_hours || 0; row.push(hoursVisible(e) ? fmtH(wh) + (t ? ' / ' + fmtH(t) : '') : ''); }
+      body.push(row); meta.push({ type: 'emp', e, g, info });
+    }
+  }
+  for (const role of ['accueil', 'schluss']) { body.push([role === 'accueil' ? 'Accueil' : 'Schluss', ...D.map(d => { const r = roleOf(d.iso, role); return r ? r.name : '–'; }), ...(showH ? [''] : [])]); meta.push({ type: 'role' }); }
+  body.push(['Personen', ...D.map(d => String(countWorking(d.iso))), ...(showH ? [''] : [])]); meta.push({ type: 'count' });
+  const colStyles = { 0: { cellWidth: 34, fontStyle: 'bold' } }; if (showH) colStyles[D.length + 1] = { cellWidth: 18, halign: 'right', fontStyle: 'bold' };
+  doc.autoTable({
+    head, body, startY: 15, margin: { left: 10, right: 10, top: 15, bottom: 10 }, theme: 'grid',
+    styles: { fontSize: fs, cellPadding: 1.2, lineColor: [205, 210, 218], lineWidth: 0.15, valign: 'middle', overflow: 'linebreak', textColor: PDF_COL.text },
+    headStyles: { fillColor: [14, 40, 65], textColor: 255, halign: 'center', fontStyle: 'bold' }, columnStyles: colStyles,
+    didParseCell: data => {
+      const m = meta[data.row.index]; if (data.section !== 'body' || !m) return;
+      if (m.type === 'grp') { data.cell.styles.fillColor = hexRgb(m.g.color); data.cell.styles.fontStyle = 'bold'; data.cell.styles.cellPadding = 0.9; }
+      else if (m.type === 'emp') {
+        if (data.column.index === 0) data.cell.styles.fillColor = hexRgb(m.e.color || m.g.color);
+        else if (data.column.index <= D.length) { const c = m.info[data.column.index - 1]; if (c.abs) { data.cell.styles.fillColor = c.absColor; data.cell.styles.textColor = c.absText; data.cell.styles.fontStyle = 'bold'; } }
+      }
+      else { data.cell.styles.fillColor = [247, 249, 251]; data.cell.styles.halign = data.column.index === 0 ? 'left' : 'center'; if (data.column.index === 0) data.cell.styles.fontStyle = 'bold'; if (m.type === 'count') data.cell.styles.textColor = [107, 116, 128]; }
+    },
+    willDrawCell: data => { const m = meta[data.row.index]; if (data.section === 'body' && m && m.type === 'emp' && data.column.index >= 1 && data.column.index <= D.length && !m.info[data.column.index - 1].abs) data.cell.text = []; },
+    didDrawCell: data => { const m = meta[data.row.index]; if (data.section === 'body' && m && m.type === 'emp' && data.column.index >= 1 && data.column.index <= D.length) { const c = m.info[data.column.index - 1]; if (!c.abs && c.lines.length) pdfDrawLines(doc, data.cell, c.lines, fs); } },
+  });
+  const pages = doc.internal.getNumberOfPages();
+  for (let p = 1; p <= pages; p++) { doc.setPage(p); doc.setFontSize(7); doc.setTextColor(120, 120, 120); doc.text('Rot = Frühdienst (' + fmtT(S.settings.early_time || '07:00') + ') bzw. Schluss (' + fmtT(S.settings.late_time || '19:00') + '), orange = ' + fmtT(S.settings.warn_time || '18:30') + '. Seite ' + p + '/' + pages, 10, doc.internal.pageSize.getHeight() - 5); }
+  doc.save(`Schaffplang_KW${isoWeek(weekStart)}_${iso(weekStart)}.pdf`);
+}
+
 /* ---------- Einstellungen ---------- */
 function renderSettings() {
   const s = S.settings;
@@ -898,6 +978,7 @@ $('#prevWeek').addEventListener('click', () => { weekStart = addDays(weekStart, 
 $('#nextWeek').addEventListener('click', () => { weekStart = addDays(weekStart, 7); render(); loadAll(); });
 $('#todayWeek').addEventListener('click', () => { weekStart = mondayOf(new Date()); selDay = Math.min((new Date().getDay() + 6) % 7, days().length - 1); render(); loadAll(); });
 $('#btnReload').addEventListener('click', () => { toast('Aktualisiere…', 1200); loadAll(); });
+$('#btnPdf').addEventListener('click', exportWeekPdf);
 $('#btnMenu').addEventListener('click', openMenu);
 $('#tabs').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; view = b.dataset.view; render(); loadAll(); });
 $('#modal').addEventListener('click', e => { if (e.target.id === 'modal') closeModal(); });

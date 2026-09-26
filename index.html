@@ -1,0 +1,893 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>MR Schaffplang</title>
+<meta name="description" content="Arbeitsplan der Maison Relais">
+<meta name="theme-color" content="#0e2841">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Schaffplang">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<style>
+:root{
+  --navy:#0e2841; --blue:#156082; --orange:#e97132; --red:#d0021b; --yellow:#fff3a3;
+  --bg:#f3f5f8; --card:#fff; --text:#1b2430; --muted:#6b7480; --line:#dfe3e8;
+  --radius:10px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:15px;line-height:1.35;-webkit-text-size-adjust:100%}
+button,input,select{font:inherit}
+button{cursor:pointer}
+.hidden{display:none!important}
+small{font-size:.8em;color:var(--muted)}
+a{color:var(--blue)}
+
+/* ---------- Login ---------- */
+#login{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px 16px;background:linear-gradient(160deg,var(--navy),#1b4a6b)}
+.lbox{background:var(--card);border-radius:16px;padding:26px 22px;width:100%;max-width:380px;box-shadow:0 10px 40px rgba(0,0,0,.25)}
+.lbox h1{margin:0 0 4px;font-size:22px;color:var(--navy)}
+.lbox p.sub{margin:0 0 18px;color:var(--muted)}
+.lbox label{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px}
+.lbox input{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:8px;font-size:16px}
+.lbox button.primary{width:100%;margin-top:16px}
+.lbox .switch{margin-top:14px;text-align:center;font-size:14px}
+.err{background:#fde8e8;color:#9b1c1c;border-radius:8px;padding:9px 12px;margin-top:12px;font-size:14px}
+.ok{background:#e6f6ea;color:#1a6b30;border-radius:8px;padding:9px 12px;margin-top:12px;font-size:14px}
+
+/* ---------- Buttons ---------- */
+button.primary{background:var(--blue);color:#fff;border:0;border-radius:8px;padding:11px 16px;font-weight:600}
+button.primary:disabled{opacity:.6}
+button.ghost{background:#fff;color:var(--text);border:1px solid var(--line);border-radius:8px;padding:9px 12px}
+button.danger{background:#fff;color:var(--red);border:1px solid #f1b9b9;border-radius:8px;padding:9px 12px}
+button.icon{background:transparent;border:0;color:#fff;font-size:20px;padding:6px 10px;border-radius:8px}
+button.icon:active{background:rgba(255,255,255,.15)}
+
+/* ---------- Header ---------- */
+header{background:var(--navy);color:#fff;position:sticky;top:0;z-index:20;padding-top:env(safe-area-inset-top)}
+.bar{display:flex;align-items:center;justify-content:space-between;padding:8px 10px 6px 14px;gap:8px}
+.bar .title{font-weight:700;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bar .right{display:flex;align-items:center;gap:2px}
+.tabs{display:flex;gap:4px;padding:0 10px 8px;overflow-x:auto;scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+.tabs button{flex:0 0 auto;background:rgba(255,255,255,.1);color:#fff;border:0;border-radius:999px;padding:6px 12px;font-size:14px}
+.tabs button.active{background:#fff;color:var(--navy);font-weight:600}
+.weeknav{display:flex;align-items:center;justify-content:center;gap:6px;background:#fff;color:var(--text);border-bottom:1px solid var(--line);padding:6px 8px}
+.weeknav .wl{font-weight:700;min-width:170px;text-align:center}
+.weeknav .wl small{display:block;font-weight:400}
+.weeknav button.nav{background:#fff;border:1px solid var(--line);border-radius:8px;width:38px;height:36px;font-size:18px}
+.weeknav button.today{background:#fff;border:1px solid var(--line);border-radius:8px;height:36px;padding:0 10px;font-size:14px}
+.admin-only{display:none}
+body.is-admin .admin-only{display:initial}
+body.is-admin .tabs.admin-only{display:flex}
+body.is-admin .planactions.admin-only{display:flex}
+
+/* ---------- Content ---------- */
+main{padding:10px 10px 40px;max-width:1500px;margin:0 auto}
+.daytabs{display:flex;gap:4px;margin:2px 0 10px}
+.daytabs button{flex:1;background:#fff;border:1px solid var(--line);border-radius:8px;padding:6px 2px;font-weight:600;color:var(--navy)}
+.daytabs button small{display:block;font-weight:400;font-size:11px}
+.daytabs button.active{background:var(--navy);color:#fff;border-color:var(--navy)}
+.daytabs button.active small{color:#cfd8e3}
+.daytabs button.istoday{box-shadow:inset 0 -3px 0 var(--orange)}
+
+.mycard{background:var(--card);border-radius:var(--radius);padding:10px 12px;margin-bottom:10px;border:1px solid var(--line)}
+.myhead{font-weight:700;color:var(--navy);margin-bottom:6px;display:flex;justify-content:space-between;align-items:baseline}
+.mydays{display:grid;grid-template-columns:repeat(auto-fit,minmax(60px,1fr));gap:4px}
+.myday{background:var(--bg);border-radius:8px;padding:6px 2px;text-align:center;font-size:13px;overflow:hidden}
+.myday.today{outline:2px solid var(--orange)}
+.myday>b{display:block}
+.myday>small{display:block;margin-bottom:3px}
+.myday .cell{justify-content:center;text-align:center;min-height:auto;padding:2px 0;font-size:11.5px;gap:2px 4px}
+.myday .cell .t b{font-weight:700}
+.myday .badge{font-size:10px;padding:0 5px}
+
+.dayhead{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:6px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:8px 12px;margin-bottom:8px}
+.dayhead .roles{display:flex;gap:12px;font-size:14px;align-items:center}
+.dayhead .roles[data-action]{cursor:pointer}
+.dayhead .pen{color:var(--blue)}
+.dayhead .opts{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:4px}
+
+.grpcard{background:var(--card);border-radius:var(--radius);border:1px solid var(--line);margin-bottom:10px;overflow:hidden}
+.grphead{background:var(--gc,#e5e7eb);font-weight:700;padding:6px 12px;color:#1b2430}
+.row{display:flex;align-items:center;gap:8px;padding:6px 12px;border-top:1px solid var(--line)}
+.row .nm{flex:0 0 118px;font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row.me{background:#eef6ff}
+.row .cell{flex:1}
+.row.empty .cell{color:var(--muted)}
+
+.cell{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;min-height:28px;border-radius:6px;padding:3px 6px;position:relative}
+.cell[data-action]{cursor:pointer}
+.cell[data-action]:hover{background:rgba(21,96,130,.08)}
+.cell .t{white-space:nowrap}
+.cell .t b{font-weight:600}
+.cell .t b.early,.cell .t b.late{color:var(--red)}
+.cell .t b.warn{color:var(--orange)}
+.cell .note{font-weight:600;color:#3d4a5c;text-transform:uppercase;letter-spacing:.3px}
+.cell.chg{background:var(--yellow)}
+.cell.chg::after{content:"";position:absolute;right:3px;top:3px;width:7px;height:7px;border-radius:50%;background:#e0b800}
+.cell.new{outline:2px solid #e0b800}
+.cell.abs{font-weight:600}
+.cell.abs-urlaub,.cell.abs-krank{background:#fbd5d5;color:#8a1c1c}
+.cell.abs-formatioun{background:#ffe0b3;color:#7a4b00}
+.cell.abs-frei{background:#e5e7eb;color:#4b5563}
+.cell.abs-sonstiges,.cell.abs-x{background:#e8dcf2;color:#4a2b6a}
+.badge{font-style:normal;font-size:11px;font-weight:700;border-radius:999px;padding:1px 7px;color:#fff;background:var(--blue)}
+.badge.schl{background:var(--navy)}
+
+.gridwrap{display:none;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);overflow:auto;max-height:calc(100vh - 150px)}
+table.grid{border-collapse:separate;border-spacing:0;width:100%;font-size:13px}
+table.grid th,table.grid td{border-bottom:1px solid var(--line);border-right:1px solid var(--line);padding:3px 4px;vertical-align:middle}
+table.grid thead th{position:sticky;top:0;background:var(--navy);color:#fff;z-index:3;text-align:center;font-size:14px}
+table.grid thead th small{color:#cfd8e3;display:block;font-weight:400}
+table.grid thead th.today{background:var(--blue)}
+table.grid td.today{background:rgba(21,96,130,.06)}
+table.grid .name{position:sticky;left:0;background:#fff;z-index:2;font-weight:600;min-width:120px;max-width:150px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+table.grid thead th.name{z-index:4;background:var(--navy);text-align:left}
+table.grid tr.grp td{background:var(--gc,#e5e7eb);font-weight:700;position:sticky;left:0}
+table.grid tr.emp td.name{background:var(--gc,#fff)}
+table.grid tr.emp.me td{background:#eef6ff}
+table.grid tr.emp .nm{display:inline-block;border-radius:6px;padding:1px 6px;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+table.grid td .cell{min-height:34px}
+table.grid .hrs{text-align:right;white-space:nowrap;font-weight:700;min-width:70px}
+table.grid .hrs.over{color:var(--red)}
+table.grid .hrs.under{color:var(--orange)}
+table.grid tr.role td{background:#f7f9fb}
+table.grid tr.role td.name{background:#f7f9fb}
+table.grid tr.count td{color:var(--muted);text-align:center}
+table.grid tr.count td.name{text-align:left}
+.rolesel{width:100%;max-width:140px;padding:3px;border:1px solid var(--line);border-radius:6px;background:#fff}
+.rolename{font-weight:600}
+.planactions{display:none;gap:8px;margin-top:10px;flex-wrap:wrap}
+
+details.warn{background:#fff8e1;border:1px solid #f3d98b;border-radius:var(--radius);padding:6px 12px;margin-bottom:10px}
+details.warn summary{cursor:pointer;font-weight:600;color:#7a5a00}
+details.warn ul{margin:6px 0 4px;padding-left:18px}
+details.warn li{margin:2px 0}
+details.warn li.info{color:var(--muted)}
+.noteinfo{background:#e8f1f8;border:1px solid #c8dced;border-radius:var(--radius);padding:8px 12px;margin-bottom:10px;font-size:14px}
+
+/* ---------- Lists / admin pages ---------- */
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:12px;margin-bottom:12px}
+.card h2{margin:0 0 8px;font-size:17px;color:var(--navy)}
+.card h2 .cnt{color:var(--muted);font-weight:400;font-size:14px}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+.toolbar select,.toolbar input{padding:8px;border:1px solid var(--line);border-radius:8px;background:#fff}
+table.list{width:100%;border-collapse:collapse;font-size:14px}
+table.list th{text-align:left;color:var(--muted);font-weight:600;border-bottom:1px solid var(--line);padding:6px 6px}
+table.list td{border-bottom:1px solid var(--line);padding:7px 6px;vertical-align:middle}
+table.list tr[data-action]{cursor:pointer}
+table.list tr:hover td{background:#f7f9fb}
+.sw{display:inline-block;width:14px;height:14px;border-radius:4px;vertical-align:-2px;margin-right:4px;border:1px solid rgba(0,0,0,.15)}
+.kind{display:inline-block;border-radius:999px;padding:1px 8px;font-size:12px;font-weight:700}
+.kind-urlaub,.kind-krank{background:#fbd5d5;color:#8a1c1c}
+.kind-formatioun{background:#ffe0b3;color:#7a4b00}
+.kind-frei{background:#e5e7eb;color:#4b5563}
+.kind-sonstiges{background:#e8dcf2;color:#4a2b6a}
+.help{font-size:14px;color:#3d4a5c}
+.help ol{padding-left:20px}
+code.url{background:#f1f3f5;padding:2px 6px;border-radius:6px;word-break:break-all}
+
+/* ---------- Forms ---------- */
+form.f .frow{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;margin:10px 0}
+form.f label{font-size:13px;color:var(--muted);min-width:78px}
+form.f input,form.f select{padding:9px 10px;border:1px solid var(--line);border-radius:8px;font-size:16px;background:#fff}
+form.f input[type=time]{width:112px}
+form.f input[type=date]{width:160px}
+form.f input[type=text],form.f input[type=number],form.f select{flex:1;min-width:140px}
+form.f input[type=number]{max-width:120px}
+form.f input[type=color]{width:52px;height:38px;padding:2px}
+form.f .chips{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}
+form.f .chips button{background:#eef2f6;border:1px solid var(--line);border-radius:999px;padding:5px 10px;font-size:13px}
+form.f .actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
+form.f .actions .spacer{flex:1}
+form.f .check{display:flex;align-items:center;gap:8px;margin:8px 0}
+form.f .check input{width:auto}
+
+/* ---------- Modal ---------- */
+.modal{position:fixed;inset:0;background:rgba(10,20,35,.55);z-index:50;display:flex;align-items:flex-end;justify-content:center;padding:0}
+.mbox{background:#fff;width:100%;max-width:560px;max-height:92vh;overflow:auto;border-radius:16px 16px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom))}
+.mbox h3{margin:0 0 6px;color:var(--navy);font-size:18px}
+.mbox h3 small{display:block;font-weight:400}
+@media(min-width:600px){.modal{align-items:center;padding:20px}.mbox{border-radius:16px}}
+
+/* ---------- Toast ---------- */
+#toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#1b2430;color:#fff;padding:10px 16px;border-radius:999px;font-size:14px;z-index:60;opacity:0;transition:opacity .2s;pointer-events:none;max-width:90vw}
+#toast.show{opacity:1}
+.spinner{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:sp .8s linear infinite;vertical-align:-2px}
+@keyframes sp{to{transform:rotate(360deg)}}
+#syncdot{width:8px;height:8px;border-radius:50%;background:#7ed957;display:inline-block;margin-right:6px}
+#syncdot.off{background:#f4b400}
+
+/* ---------- Desktop ---------- */
+@media(min-width:900px){
+  .daytabs,.daylist{display:none}
+  .gridwrap{display:block}
+  .mycard .mydays{grid-template-columns:repeat(7,1fr)}
+  main{padding:14px 16px 40px}
+}
+@media print{
+  header,.daytabs,.daylist,.planactions,details.warn,.mycard,#toast{display:none!important}
+  body{background:#fff}
+  main{padding:0;max-width:none}
+  .gridwrap{display:block;max-height:none;overflow:visible;border:0}
+  table.grid{font-size:11px}
+  table.grid thead th{position:static;background:#0e2841!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  table.grid td,table.grid tr.grp td,table.grid tr.emp td.name{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .rolesel{border:0;appearance:none;background:transparent}
+  @page{size:landscape;margin:8mm}
+}
+</style>
+</head>
+<body>
+
+<!-- ===== Login ===== -->
+<div id="login" class="hidden">
+  <div class="lbox">
+    <h1>MR Schaffplang</h1>
+    <p class="sub">Arbeitsplan – Maison Relais</p>
+    <form id="fLogin">
+      <label>E-Mail</label><input type="email" name="email" autocomplete="username" required>
+      <label>Passwort</label><input type="password" name="password" autocomplete="current-password" required>
+      <button class="primary" type="submit">Anmelden</button>
+      <div id="loginMsg"></div>
+    </form>
+    <form id="fRegister" class="hidden">
+      <label>Dein Name (wie im Plan)</label><input type="text" name="name" autocomplete="name" required>
+      <label>E-Mail</label><input type="email" name="email" autocomplete="username" required>
+      <label>Passwort (mind. 6 Zeichen)</label><input type="password" name="password" autocomplete="new-password" minlength="6" required>
+      <label>Einladungscode</label><input type="text" name="code" autocomplete="off" required>
+      <button class="primary" type="submit">Registrieren</button>
+      <div id="regMsg"></div>
+    </form>
+    <div class="switch"><a href="#" id="toRegister">Noch kein Zugang? Registrieren</a><a href="#" id="toLogin" class="hidden">Zurück zur Anmeldung</a></div>
+  </div>
+</div>
+
+<!-- ===== App ===== -->
+<div id="main" class="hidden">
+  <header>
+    <div class="bar">
+      <div class="title" id="title">Schaffplang</div>
+      <div class="right">
+        <button class="icon" id="btnReload" title="Aktualisieren">↻</button>
+        <button class="icon" id="btnMenu" title="Menü">☰</button>
+      </div>
+    </div>
+    <nav class="tabs admin-only" id="tabs">
+      <button data-view="plan" class="active">Plan</button>
+      <button data-view="absences">Abwesenheiten</button>
+      <button data-view="employees">Mitarbeiter</button>
+      <button data-view="logins">Logins</button>
+      <button data-view="settings">Einstellungen</button>
+    </nav>
+    <div class="weeknav" id="weeknav">
+      <button class="nav" id="prevWeek" title="Vorherige Woche">‹</button>
+      <div class="wl" id="weekLabel"></div>
+      <button class="nav" id="nextWeek" title="Nächste Woche">›</button>
+      <button class="today" id="todayWeek">Heute</button>
+    </div>
+  </header>
+  <main id="content"></main>
+</div>
+
+<div id="modal" class="modal hidden"><div class="mbox" id="mbox"></div></div>
+<div id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script>
+/* ============================================================
+   Konfiguration
+   ============================================================ */
+const SUPABASE_URL = 'https://uphpwnqharjufbwcazyx.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_iub9LBRNcmyj_MfScPKN6Q_2IsNHJmM';
+
+/* ============================================================
+   Hilfsfunktionen
+   ============================================================ */
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const pad2 = n => String(n).padStart(2, '0');
+const iso = d => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+const parseISO = s => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
+const addDays = (d, n) => { const x = new Date(d.getFullYear(), d.getMonth(), d.getDate()); x.setDate(x.getDate() + n); return x; };
+const mondayOf = d => addDays(d, -((d.getDay() + 6) % 7));
+const isoWeek = d => { const x = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())); const day = x.getUTCDay() || 7; x.setUTCDate(x.getUTCDate() + 4 - day); const y0 = new Date(Date.UTC(x.getUTCFullYear(), 0, 1)); return Math.ceil((((x - y0) / 86400000) + 1) / 7); };
+const fmtD = d => `${pad2(d.getDate())}.${pad2(d.getMonth() + 1)}.`;
+const fmtDY = d => `${pad2(d.getDate())}.${pad2(d.getMonth() + 1)}.${d.getFullYear()}`;
+const fmtDS = s => fmtDY(parseISO(s));
+const t5 = t => (t ? String(t).slice(0, 5) : null);
+const fmtT = t => { if (!t) return ''; const [h, m] = t5(t).split(':'); return `${+h}:${m}`; };
+const mins = t => { if (!t) return null; const [h, m] = t5(t).split(':').map(Number); return h * 60 + m; };
+const fmtH = h => (Math.round(h * 100) / 100).toLocaleString('de-DE', { maximumFractionDigits: 2 });
+const DAY_LABELS = ['LU', 'MA', 'ME', 'JE', 'VE', 'SA', 'DI'];
+const DAY_LONG = ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag'];
+const KINDS = { urlaub: 'Congé', krank: 'Krank', formatioun: 'Formatioun', frei: 'Fräi', sonstiges: 'Sonstiges' };
+const todayIso = () => iso(new Date());
+
+function toast(msg, ms = 2600) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove('show'), ms); }
+function openModal(html) { $('#mbox').innerHTML = html; $('#modal').classList.remove('hidden'); const f = $('#mbox input:not([type=hidden]),#mbox select'); if (f && window.innerWidth > 900) f.focus(); }
+function closeModal() { $('#modal').classList.add('hidden'); $('#mbox').innerHTML = ''; }
+function formData(form) { const o = {}; new FormData(form).forEach((v, k) => { o[k] = typeof v === 'string' ? v.trim() : v; }); return o; }
+function errMsg(e) { const m = (e && (e.message || e.error_description || e.msg)) || String(e); return m; }
+
+/* ============================================================
+   Zustand
+   ============================================================ */
+let sb, session = null, profile = null, isAdmin = false, rt = null, loading = false, loadAgain = false;
+let weekStart = mondayOf(new Date());
+let selDay = Math.min((new Date().getDay() + 6) % 7, 4);
+let view = 'plan';
+let lastSeen = null;
+let onlyWorking = false;
+const S = { groups: [], employees: [], shifts: [], absences: [], absPublic: [], roles: [], settings: {}, profiles: [], absList: [] };
+
+try { lastSeen = +localStorage.getItem('mr_lastSeen') || null; onlyWorking = localStorage.getItem('mr_onlyWorking') === '1'; } catch (e) { }
+
+/* ============================================================
+   Start / Login
+   ============================================================ */
+async function init() {
+  if (!window.supabase) { document.body.innerHTML = '<p style="padding:20px">Die App konnte eine benötigte Datei nicht laden. Bitte Internetverbindung prüfen und neu laden.</p>'; return; }
+  sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+  sb.auth.onAuthStateChange((ev, s) => {
+    if (ev === 'SIGNED_OUT') { session = null; profile = null; showLogin(); return; }
+    if (s && (!session || s.user.id !== session.user.id)) { session = s; afterLogin(); }
+  });
+  const { data } = await sb.auth.getSession();
+  if (data && data.session) { session = data.session; afterLogin(); } else showLogin();
+  if ('serviceWorker' in navigator) { try { navigator.serviceWorker.register('sw.js'); } catch (e) { } }
+}
+
+function showLogin() {
+  $('#main').classList.add('hidden'); $('#login').classList.remove('hidden');
+  document.body.classList.remove('is-admin');
+}
+
+async function afterLogin() {
+  const { data: p } = await sb.from('profiles').select('*').eq('user_id', session.user.id).maybeSingle();
+  profile = p || { user_id: session.user.id, is_admin: false, employee_id: null, display_name: session.user.email };
+  isAdmin = !!profile.is_admin;
+  document.body.classList.toggle('is-admin', isAdmin);
+  $('#login').classList.add('hidden'); $('#main').classList.remove('hidden');
+  try { localStorage.setItem('mr_lastSeen', String(Date.now())); } catch (e) { }
+  await loadAll();
+  setupRealtime();
+}
+
+$('#toRegister').addEventListener('click', e => { e.preventDefault(); $('#fLogin').classList.add('hidden'); $('#fRegister').classList.remove('hidden'); $('#toRegister').classList.add('hidden'); $('#toLogin').classList.remove('hidden'); });
+$('#toLogin').addEventListener('click', e => { e.preventDefault(); $('#fRegister').classList.add('hidden'); $('#fLogin').classList.remove('hidden'); $('#toLogin').classList.add('hidden'); $('#toRegister').classList.remove('hidden'); });
+
+$('#fLogin').addEventListener('submit', async e => {
+  e.preventDefault(); const f = e.target; const d = formData(f); const btn = $('button', f); const msg = $('#loginMsg');
+  btn.disabled = true; msg.innerHTML = '';
+  const { error } = await sb.auth.signInWithPassword({ email: d.email, password: d.password });
+  btn.disabled = false;
+  if (error) msg.innerHTML = `<div class="err">${esc(loginError(error))}</div>`;
+});
+function loginError(error) {
+  const m = errMsg(error);
+  if (/invalid login credentials/i.test(m)) return 'E-Mail oder Passwort ist falsch.';
+  if (/email not confirmed/i.test(m)) return 'Die E-Mail-Adresse ist noch nicht bestätigt. Bitte den Admin fragen.';
+  if (/rate limit/i.test(m)) return 'Zu viele Versuche. Bitte kurz warten.';
+  return 'Anmeldung fehlgeschlagen: ' + m;
+}
+
+$('#fRegister').addEventListener('submit', async e => {
+  e.preventDefault(); const f = e.target; const d = formData(f); const btn = $('button', f); const msg = $('#regMsg');
+  btn.disabled = true; msg.innerHTML = '';
+  const { data, error } = await sb.auth.signUp({ email: d.email, password: d.password, options: { data: { name: d.name, code: d.code } } });
+  btn.disabled = false;
+  if (error) {
+    const m = errMsg(error);
+    let t = 'Registrierung fehlgeschlagen: ' + m;
+    if (/database error/i.test(m) || /einladungscode/i.test(m)) t = 'Der Einladungscode ist falsch. Bitte beim Admin nachfragen.';
+    else if (/already registered|already exists/i.test(m)) t = 'Für diese E-Mail gibt es schon einen Zugang. Bitte anmelden.';
+    else if (/password/i.test(m)) t = 'Das Passwort ist zu kurz oder zu einfach (mind. 6 Zeichen).';
+    msg.innerHTML = `<div class="err">${esc(t)}</div>`; return;
+  }
+  if (data && data.user && !data.session) {
+    if (data.user.identities && data.user.identities.length === 0) { msg.innerHTML = '<div class="err">Für diese E-Mail gibt es schon einen Zugang. Bitte anmelden.</div>'; return; }
+    msg.innerHTML = '<div class="ok">Registriert. Bitte E-Mail bestätigen oder beim Admin melden.</div>';
+  }
+});
+
+/* ============================================================
+   Daten laden
+   ============================================================ */
+async function loadAll() {
+  if (loading) { loadAgain = true; return; }
+  loading = true;
+  try {
+    const from = iso(weekStart), to = iso(addDays(weekStart, 6));
+    const reqs = [
+      sb.from('groups').select('*').order('sort_order').order('name'),
+      sb.from('employees').select('*').order('sort_order').order('name'),
+      sb.from('shifts').select('*').gte('day', from).lte('day', to),
+      sb.from('day_roles').select('*').gte('day', from).lte('day', to),
+      sb.from('settings').select('*'),
+      sb.from('absences').select('*').lte('from_day', to).gte('to_day', from),
+    ];
+    if (!isAdmin) reqs.push(sb.rpc('absences_public', { p_from: from, p_to: to }));
+    const res = await Promise.all(reqs);
+    const bad = res.find(r => r.error);
+    if (bad) { toast('Fehler beim Laden: ' + errMsg(bad.error), 5000); console.error(bad.error); }
+    S.groups = res[0].data || []; S.employees = res[1].data || []; S.shifts = res[2].data || []; S.roles = res[3].data || [];
+    S.settings = Object.fromEntries((res[4].data || []).map(r => [r.key, r.value]));
+    S.absences = res[5].data || [];
+    S.absPublic = isAdmin ? [] : ((res[6] && res[6].data) || []);
+    if (isAdmin && view === 'logins') await loadProfiles();
+    if (view === 'absences') await loadAbsList();
+    render();
+  } catch (e) { console.error(e); toast('Fehler: ' + errMsg(e), 5000); }
+  loading = false;
+  if (loadAgain) { loadAgain = false; loadAll(); }
+}
+async function loadProfiles() { const { data } = await sb.from('profiles').select('*').order('display_name'); S.profiles = data || []; }
+async function loadAbsList() { const { data } = await sb.from('absences').select('*').gte('to_day', iso(addDays(new Date(), -60))).order('from_day', { ascending: false }); S.absList = data || []; }
+
+let reloadTimer = null;
+function scheduleReload() { clearTimeout(reloadTimer); reloadTimer = setTimeout(loadAll, 400); }
+function setupRealtime() {
+  if (rt) return;
+  rt = sb.channel('plan-live')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'settings' }, scheduleReload)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'shifts' }, scheduleReload)
+    .subscribe(status => { const d = $('#syncdot'); if (d) d.classList.toggle('off', status !== 'SUBSCRIBED'); });
+  setInterval(() => { if (document.visibilityState === 'visible' && session) loadAll(); }, 60000);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && session) loadAll(); });
+}
+
+/* ============================================================
+   Abgeleitete Daten
+   ============================================================ */
+function days() { const n = Math.min(7, Math.max(5, +S.settings.days_per_week || 5)); return Array.from({ length: n }, (_, i) => { const d = addDays(weekStart, i); return { i, date: d, iso: iso(d), label: DAY_LABELS[i], long: DAY_LONG[i] }; }); }
+function empById(id) { return S.employees.find(e => e.id === id); }
+function shiftOf(empId, day) { return S.shifts.find(s => s.employee_id === empId && s.day === day); }
+function absOf(empId, day) {
+  const a = S.absences.find(x => x.employee_id === empId && x.from_day <= day && x.to_day >= day);
+  if (a) return Object.assign({ known: true }, a);
+  const p = S.absPublic.find(x => x.employee_id === empId && x.from_day <= day && x.to_day >= day);
+  if (p) return { employee_id: empId, kind: null, known: false };
+  return null;
+}
+function roleOf(day, role) { const r = S.roles.find(x => x.day === day && x.role === role); return r ? empById(r.employee_id) : null; }
+function hasTimes(s) { return !!(s && ((s.start1 && s.end1) || (s.start2 && s.end2))); }
+function shiftHours(s) { let h = 0; if (s.start1 && s.end1) h += (mins(s.end1) - mins(s.start1)) / 60; if (s.start2 && s.end2) h += (mins(s.end2) - mins(s.start2)) / 60; return Math.max(0, h); }
+function weekHours(emp) { return days().reduce((sum, d) => { const s = shiftOf(emp.id, d.iso); if (!s || absOf(emp.id, d.iso)) return sum; return sum + shiftHours(s); }, 0); }
+function isChanged(s) { const cd = +S.settings.change_days; if (!(cd > 0)) return false; return s && s.updated_at && (Date.now() - new Date(s.updated_at).getTime()) < cd * 86400000; }
+function isNew(s) { return !!(s && lastSeen && s.updated_at && new Date(s.updated_at).getTime() > lastSeen); }
+function countWorking(day) { return S.employees.filter(e => e.active !== false && hasTimes(shiftOf(e.id, day)) && !absOf(e.id, day)).length; }
+function sections() {
+  const active = S.employees.filter(e => e.active !== false);
+  const out = S.groups.map(g => ({ g, emps: active.filter(e => e.group_id === g.id) })).filter(x => x.emps.length);
+  const rest = active.filter(e => !S.groups.some(g => g.id === e.group_id));
+  if (rest.length) out.push({ g: { id: 0, name: 'Ohne Gruppe', color: '#e5e7eb' }, emps: rest });
+  return out;
+}
+function timeCls(t, kind) {
+  const v = t5(t);
+  if (kind === 'start' && v === t5(S.settings.early_time)) return 'early';
+  if (kind === 'end' && v === t5(S.settings.late_time)) return 'late';
+  if (kind === 'end' && v === t5(S.settings.warn_time)) return 'warn';
+  return '';
+}
+
+/* ============================================================
+   Rendern
+   ============================================================ */
+function render() {
+  $('#title').innerHTML = `<span id="syncdot" title="Live-Verbindung"></span>${esc(S.settings.title || 'Schaffplang')}`;
+  const D = days();
+  $('#weekLabel').innerHTML = `KW ${isoWeek(weekStart)}<small>${fmtD(weekStart)} – ${fmtDY(addDays(weekStart, D.length - 1))}</small>`;
+  $$('#tabs button').forEach(b => b.classList.toggle('active', b.dataset.view === view));
+  $('#weeknav').classList.toggle('hidden', view !== 'plan');
+  if (!isAdmin && view !== 'plan' && view !== 'absences') view = 'plan';
+  const c = $('#content');
+  if (view === 'plan') c.innerHTML = renderPlan(D);
+  else if (view === 'absences') c.innerHTML = renderAbsences();
+  else if (view === 'employees') c.innerHTML = renderEmployees();
+  else if (view === 'logins') c.innerHTML = renderLogins();
+  else if (view === 'settings') c.innerHTML = renderSettings();
+}
+
+function cellHtml(emp, d) {
+  const s = shiftOf(emp.id, d.iso); const a = absOf(emp.id, d.iso);
+  const cls = ['cell']; let inner = '';
+  if (a) {
+    const label = a.known ? (KINDS[a.kind] || 'Abwesend') : 'Abwesend';
+    cls.push('abs', 'abs-' + (a.known ? a.kind : 'x'));
+    inner = `<span class="abslbl">${esc(label)}</span>${a.known && a.note ? `<small>${esc(a.note)}</small>` : ''}`;
+  } else if (s) {
+    const parts = [];
+    const blocks = [[s.start1, s.end1], [s.start2, s.end2]].filter(b => b[0] && b[1]).sort((x, y) => mins(x[0]) - mins(y[0]));
+    for (const [st, en] of blocks) parts.push(`<span class="t"><b class="${timeCls(st, 'start')}">${fmtT(st)}</b>–<b class="${timeCls(en, 'end')}">${fmtT(en)}</b></span>`);
+    if (s.note) parts.push(`<small class="note">${esc(s.note)}</small>`);
+    inner = parts.join('');
+    if (isChanged(s)) cls.push('chg');
+    if (isNew(s)) cls.push('new');
+  }
+  const badges = [];
+  const acc = roleOf(d.iso, 'accueil'), schl = roleOf(d.iso, 'schluss');
+  if (acc && acc.id === emp.id) badges.push('<i class="badge acc">Accueil</i>');
+  if (schl && schl.id === emp.id) badges.push('<i class="badge schl">Schluss</i>');
+  const act = isAdmin ? `data-action="edit" data-emp="${emp.id}" data-day="${d.iso}"` : '';
+  return `<div class="${cls.join(' ')}" ${act}>${inner}${badges.join('')}</div>`;
+}
+
+function renderPlan(D) {
+  const secs = sections();
+  let h = '';
+  if (isAdmin) h += renderWarnings(D);
+  if (selDay >= D.length) selDay = 0;
+  h += `<div class="daytabs">${D.map(d => `<button class="${d.i === selDay ? 'active' : ''} ${d.iso === todayIso() ? 'istoday' : ''}" data-action="selday" data-i="${d.i}">${d.label}<small>${fmtD(d.date)}</small></button>`).join('')}</div>`;
+  h += renderMyWeek(D);
+  h += `<div class="daylist">${renderDayList(D[selDay], secs)}</div>`;
+  h += `<div class="gridwrap"><table class="grid">${renderGrid(D, secs)}</table></div>`;
+  h += `<div class="planactions admin-only"><button class="ghost" data-action="copyweek">Woche kopieren…</button><button class="ghost" data-action="print">Drucken</button></div>`;
+  if (!S.employees.length) h += `<div class="card">Noch keine Mitarbeiter angelegt.${isAdmin ? ' Gehe zu „Mitarbeiter“, um zu starten.' : ''}</div>`;
+  return h;
+}
+
+function renderMyWeek(D) {
+  if (!profile || !profile.employee_id) return '';
+  const e = empById(profile.employee_id); if (!e) return '';
+  const target = +e.weekly_hours || 0;
+  return `<div class="mycard"><div class="myhead"><span>Meine Woche – ${esc(e.name)}</span><small>${fmtH(weekHours(e))} h${target ? ` / ${fmtH(target)} h` : ''}</small></div><div class="mydays">${D.map(d => `<div class="myday ${d.iso === todayIso() ? 'today' : ''}"><b>${d.label}</b><small>${fmtD(d.date)}</small>${cellHtml(e, d)}</div>`).join('')}</div></div>`;
+}
+
+function renderDayList(d, secs) {
+  const acc = roleOf(d.iso, 'accueil'), schl = roleOf(d.iso, 'schluss');
+  let h = `<div class="dayhead"><div><b>${d.long}</b> ${fmtDY(d.date)} <small>· ${countWorking(d.iso)} Personen</small></div>
+    <div class="roles" ${isAdmin ? `data-action="editroles" data-day="${d.iso}"` : ''}><span>Accueil: <b>${acc ? esc(acc.name) : '–'}</b></span><span>Schluss: <b>${schl ? esc(schl.name) : '–'}</b></span>${isAdmin ? '<span class="pen">✎</span>' : ''}</div>
+    <label class="opts"><input type="checkbox" data-action="onlyworking" ${onlyWorking ? 'checked' : ''}> nur Anwesende</label></div>`;
+  for (const { g, emps } of secs) {
+    const rows = emps.filter(e => !onlyWorking || hasTimes(shiftOf(e.id, d.iso)) || absOf(e.id, d.iso) || (shiftOf(e.id, d.iso) || {}).note);
+    if (!rows.length) continue;
+    h += `<div class="grpcard" style="--gc:${esc(g.color)}"><div class="grphead">${esc(g.name)}</div>`;
+    for (const e of rows) {
+      const sh = shiftOf(e.id, d.iso); const empty = !hasTimes(sh) && !absOf(e.id, d.iso) && !(sh && sh.note);
+      h += `<div class="row ${profile.employee_id === e.id ? 'me' : ''} ${empty ? 'empty' : ''}"><div class="nm"><span style="${e.color ? `background:${esc(e.color)};border-radius:6px;padding:1px 6px` : ''}">${esc(e.name)}</span></div>${cellHtml(e, d)}</div>`;
+    }
+    h += '</div>';
+  }
+  return h;
+}
+
+function roleSelect(day, role, cur) {
+  const opts = ['<option value="">–</option>'].concat(S.employees.filter(e => e.active !== false).map(e => `<option value="${e.id}" ${cur && cur.id === e.id ? 'selected' : ''}>${esc(e.name)}</option>`));
+  return `<select class="rolesel" data-action="setrole" data-day="${day}" data-role="${role}">${opts.join('')}</select>`;
+}
+
+function renderGrid(D, secs) {
+  const ti = todayIso();
+  let h = `<thead><tr><th class="name">Name</th>${D.map(d => `<th class="${d.iso === ti ? 'today' : ''}">${d.label}<small>${fmtD(d.date)}</small></th>`).join('')}<th class="hrs">Std.</th></tr></thead><tbody>`;
+  for (const { g, emps } of secs) {
+    h += `<tr class="grp" style="--gc:${esc(g.color)}"><td colspan="${D.length + 2}">${esc(g.name)}</td></tr>`;
+    for (const e of emps) {
+      const wh = weekHours(e); const target = +e.weekly_hours || 0;
+      const hcls = target && Math.abs(wh - target) > 0.01 ? (wh > target ? 'over' : 'under') : '';
+      h += `<tr class="emp ${profile.employee_id === e.id ? 'me' : ''}" style="--gc:${esc(e.color || g.color)}"><td class="name"><span class="nm" style="${e.color ? `background:${esc(e.color)}` : ''}">${esc(e.name)}</span></td>${D.map(d => `<td class="${d.iso === ti ? 'today' : ''}">${cellHtml(e, d)}</td>`).join('')}<td class="hrs ${hcls}" title="Soll: ${target} h">${fmtH(wh)}${target ? `<small>/${fmtH(target)}</small>` : ''}</td></tr>`;
+    }
+  }
+  for (const role of ['accueil', 'schluss']) {
+    h += `<tr class="role"><td class="name">${role === 'accueil' ? 'Accueil' : 'Schluss'}</td>${D.map(d => { const r = roleOf(d.iso, role); return `<td>${isAdmin ? roleSelect(d.iso, role, r) : `<span class="rolename">${r ? esc(r.name) : '–'}</span>`}</td>`; }).join('')}<td></td></tr>`;
+  }
+  h += `<tr class="count"><td class="name">Personen</td>${D.map(d => `<td>${countWorking(d.iso)}</td>`).join('')}<td></td></tr>`;
+  return h + '</tbody>';
+}
+
+function computeWarnings(D) {
+  const w = [];
+  for (const d of D) {
+    const acc = roleOf(d.iso, 'accueil'), schl = roleOf(d.iso, 'schluss');
+    const early = t5(S.settings.early_time), late = t5(S.settings.late_time);
+    if (!acc) w.push({ d, msg: 'Kein Accueil eingetragen' });
+    else {
+      const s = shiftOf(acc.id, d.iso);
+      if (absOf(acc.id, d.iso)) w.push({ d, msg: `${acc.name} (Accueil) ist abwesend` });
+      else if (early && !(s && [s.start1, s.start2].some(t => t5(t) === early))) w.push({ d, msg: `${acc.name} (Accueil) fängt nicht um ${fmtT(early)} an` });
+    }
+    if (!schl) w.push({ d, msg: 'Kein Schluss eingetragen' });
+    else {
+      const s = shiftOf(schl.id, d.iso);
+      if (absOf(schl.id, d.iso)) w.push({ d, msg: `${schl.name} (Schluss) ist abwesend` });
+      else if (late && !(s && [s.end1, s.end2].some(t => t5(t) === late))) w.push({ d, msg: `${schl.name} (Schluss) arbeitet nicht bis ${fmtT(late)}` });
+    }
+    for (const e of S.employees) {
+      if (e.active === false) continue;
+      const s = shiftOf(e.id, d.iso); if (!s) continue;
+      const a = absOf(e.id, d.iso);
+      if (a && hasTimes(s)) w.push({ d, msg: `${e.name}: Dienst eingetragen, aber abwesend (${KINDS[a.kind] || 'Abwesend'})`, info: true });
+      if ((s.start1 && !s.end1) || (!s.start1 && s.end1) || (s.start2 && !s.end2) || (!s.start2 && s.end2)) w.push({ d, msg: `${e.name}: Zeit unvollständig (Von oder Bis fehlt)` });
+      if (s.start1 && s.end1 && mins(s.end1) <= mins(s.start1)) w.push({ d, msg: `${e.name}: Ende liegt vor Beginn` });
+      if (s.start2 && s.end2 && mins(s.end2) <= mins(s.start2)) w.push({ d, msg: `${e.name}: Ende (2. Block) liegt vor Beginn` });
+    }
+  }
+  return w;
+}
+function renderWarnings(D) {
+  const w = computeWarnings(D);
+  if (!w.length) return '';
+  return `<details class="warn"><summary>⚠ ${w.length} Hinweis${w.length === 1 ? '' : 'e'} für diese Woche</summary><ul>${w.map(x => `<li class="${x.info ? 'info' : ''}"><b>${x.d.label} ${fmtD(x.d.date)}</b> – ${esc(x.msg)}</li>`).join('')}</ul></details>`;
+}
+
+/* ---------- Abwesenheiten (Liste) ---------- */
+function renderAbsences() {
+  const linked = profile.employee_id ? empById(profile.employee_id) : null;
+  let h = `<div class="card"><h2>${isAdmin ? 'Abwesenheiten' : 'Meine Abwesenheiten'} <span class="cnt">(${S.absList.length})</span></h2>`;
+  if (isAdmin) h += `<div class="toolbar"><button class="primary" data-action="newabs">+ Neue Abwesenheit</button><select data-action="absfilter"><option value="">Alle Mitarbeiter</option>${S.employees.map(e => `<option value="${e.id}" ${S.absFilter == e.id ? 'selected' : ''}>${esc(e.name)}</option>`).join('')}</select></div>`;
+  else if (!linked) h += `<div class="noteinfo">Dein Login ist noch keinem Namen im Plan zugeordnet. Bitte den Admin darum bitten – dann siehst du hier deine Abwesenheiten und „Meine Woche“.</div>`;
+  const list = S.absList.filter(a => !S.absFilter || a.employee_id == S.absFilter);
+  if (!list.length) h += '<p class="help">Keine Einträge (ab 60 Tage zurück).</p>';
+  else {
+    h += `<table class="list"><thead><tr><th>Wer</th><th>Von</th><th>Bis</th><th>Art</th><th>Notiz</th></tr></thead><tbody>`;
+    for (const a of list) { const e = empById(a.employee_id); h += `<tr ${isAdmin ? `data-action="editabs" data-id="${a.id}"` : ''}><td><b>${esc(e ? e.name : '?')}</b></td><td>${fmtDS(a.from_day)}</td><td>${fmtDS(a.to_day)}</td><td><span class="kind kind-${esc(a.kind)}">${esc(KINDS[a.kind] || a.kind)}</span></td><td>${esc(a.note || '')}</td></tr>`; }
+    h += '</tbody></table>';
+  }
+  return h + '</div>' + (isAdmin ? '<p class="help">Tipp: Auf eine Zeile klicken, um sie zu ändern oder zu löschen. Im Plan sehen Kollegen nur „Abwesend“ – den Grund (Congé/Krank …) siehst nur du als Admin und die Person selbst.</p>' : '');
+}
+
+/* ---------- Mitarbeiter & Gruppen ---------- */
+function renderEmployees() {
+  let h = `<div class="card"><h2>Mitarbeiter <span class="cnt">(${S.employees.length})</span></h2><div class="toolbar"><button class="primary" data-action="newemp">+ Neuer Mitarbeiter</button></div>
+  <table class="list"><thead><tr><th>Name</th><th>Gruppe</th><th>Std./Woche</th><th>Reihenfolge</th><th>Aktiv</th></tr></thead><tbody>`;
+  for (const e of S.employees) { const g = S.groups.find(x => x.id === e.group_id); h += `<tr data-action="editemp" data-id="${e.id}"><td><b>${e.color ? `<span class="sw" style="background:${esc(e.color)}"></span>` : ''}${esc(e.name)}</b></td><td>${g ? `<span class="sw" style="background:${esc(g.color)}"></span>${esc(g.name)}` : '<small>–</small>'}</td><td>${fmtH(+e.weekly_hours || 0)}</td><td>${e.sort_order}</td><td>${e.active === false ? '<small>nein</small>' : 'ja'}</td></tr>`; }
+  h += `</tbody></table></div>`;
+  h += `<div class="card"><h2>Gruppen <span class="cnt">(${S.groups.length})</span></h2><div class="toolbar"><button class="primary" data-action="newgroup">+ Neue Gruppe</button></div>
+  <table class="list"><thead><tr><th>Name</th><th>Farbe</th><th>Reihenfolge</th><th>Personen</th></tr></thead><tbody>`;
+  for (const g of S.groups) h += `<tr data-action="editgroup" data-id="${g.id}"><td><b>${esc(g.name)}</b></td><td><span class="sw" style="background:${esc(g.color)}"></span>${esc(g.color)}</td><td>${g.sort_order}</td><td>${S.employees.filter(e => e.group_id === g.id).length}</td></tr>`;
+  h += '</tbody></table></div><p class="help">Auf eine Zeile klicken, um sie zu bearbeiten. Die Reihenfolge bestimmt die Sortierung im Plan (kleine Zahl = oben).</p>';
+  return h;
+}
+
+/* ---------- Logins ---------- */
+function renderLogins() {
+  const url = location.origin + location.pathname;
+  let h = `<div class="card"><h2>Logins <span class="cnt">(${S.profiles.length})</span></h2>
+  <div class="noteinfo"><b>So bekommen Kollegen Zugang:</b><ol><li>Link auf dem Handy öffnen: <code class="url">${esc(url)}</code></li><li>Auf „Registrieren“ tippen, Name, E-Mail, Passwort und den Einladungscode <b>${esc(S.settings.invite_code || '(kein Code gesetzt – jeder kann sich registrieren)')}</b> eingeben.</li><li>Dann hier unten den neuen Login dem richtigen Namen im Plan zuordnen.</li></ol>
+  Passwort vergessen? Login im Supabase-Dashboard (Authentication → Users) löschen, die Person registriert sich einfach neu.</div>
+  <table class="list"><thead><tr><th>Login</th><th>Name im Plan</th><th>Admin</th></tr></thead><tbody>`;
+  for (const p of S.profiles) {
+    const me = p.user_id === session.user.id;
+    h += `<tr><td><b>${esc(p.display_name || p.user_id)}</b>${me ? ' <small>(du)</small>' : ''}</td><td><select data-action="linkprofile" data-uid="${p.user_id}"><option value="">– nicht zugeordnet –</option>${S.employees.map(e => `<option value="${e.id}" ${p.employee_id === e.id ? 'selected' : ''}>${esc(e.name)}</option>`).join('')}</select></td><td><input type="checkbox" data-action="setadmin" data-uid="${p.user_id}" ${p.is_admin ? 'checked' : ''} ${me ? 'disabled title="Du kannst dir selbst das Admin-Recht nicht entziehen"' : ''}></td></tr>`;
+  }
+  return h + '</tbody></table></div>';
+}
+
+/* ---------- Einstellungen ---------- */
+function renderSettings() {
+  const s = S.settings;
+  return `<div class="card"><h2>Einstellungen</h2><form class="f" id="fSettings">
+    <div class="frow"><label>Titel</label><input type="text" name="title" value="${esc(s.title || '')}"></div>
+    <div class="frow"><label>Frühdienst</label><input type="time" name="early_time" value="${esc(t5(s.early_time) || '')}"><small>wird rot markiert (z. B. 7:00)</small></div>
+    <div class="frow"><label>Schluss</label><input type="time" name="late_time" value="${esc(t5(s.late_time) || '')}"><small>wird rot markiert (z. B. 19:00)</small></div>
+    <div class="frow"><label>Warnzeit</label><input type="time" name="warn_time" value="${esc(t5(s.warn_time) || '')}"><small>wird orange markiert (z. B. 18:30)</small></div>
+    <div class="frow"><label>Wochentage</label><select name="days_per_week"><option value="5" ${s.days_per_week == 5 ? 'selected' : ''}>Montag – Freitag</option><option value="6" ${s.days_per_week == 6 ? 'selected' : ''}>Montag – Samstag</option><option value="7" ${s.days_per_week == 7 ? 'selected' : ''}>Montag – Sonntag</option></select></div>
+    <div class="frow"><label>Änderungen</label><input type="number" name="change_days" min="0" max="30" value="${esc(s.change_days ?? 3)}"><small>Tage lang gelb markieren (0 = aus)</small></div>
+    <div class="frow"><label>Einladungscode</label><input type="text" name="invite_code" value="${esc(s.invite_code || '')}"><small>für die Registrierung neuer Kollegen (leer = jeder darf)</small></div>
+    <div class="actions"><button class="primary" type="submit">Speichern</button></div></form></div>
+    <div class="card"><h2>Über die App</h2><p class="help">Daten: Supabase (Frankfurt). Änderungen erscheinen bei allen Kollegen automatisch. Bei Problemen die Seite neu laden (↻ oben rechts).</p></div>`;
+}
+
+/* ============================================================
+   Bearbeiten (Admin)
+   ============================================================ */
+function openShiftEditor(empId, day) {
+  const e = empById(empId); const s = shiftOf(empId, day) || {}; const d = parseISO(day);
+  const prev = shiftOf(empId, iso(addDays(d, -1)));
+  const a = absOf(empId, day);
+  openModal(`<h3>${esc(e.name)}<small>${DAY_LONG[(d.getDay() + 6) % 7]}, ${fmtDY(d)}</small></h3>
+  ${a ? `<div class="noteinfo">An diesem Tag ist eine Abwesenheit eingetragen (${esc(KINDS[a.kind] || 'Abwesend')}). Der Plan zeigt dann „${esc(KINDS[a.kind] || 'Abwesend')}“ statt der Zeiten.</div>` : ''}
+  <form class="f" id="fShift">
+    <div class="frow"><label>Dienst von</label><input type="time" name="start1" value="${esc(t5(s.start1) || '')}" step="300"><label style="min-width:auto">bis</label><input type="time" name="end1" value="${esc(t5(s.end1) || '')}" step="300"></div>
+    <div class="frow"><label>2. Block von</label><input type="time" name="start2" value="${esc(t5(s.start2) || '')}" step="300"><label style="min-width:auto">bis</label><input type="time" name="end2" value="${esc(t5(s.end2) || '')}" step="300"></div>
+    <div class="chips">
+      <button type="button" data-fill="start2=${esc(t5(S.settings.early_time) || '07:00')}|end2=08:00">Précoce ${fmtT(S.settings.early_time || '07:00')}–8:00</button>
+      <button type="button" data-fill="start1=11:30|end1=18:00">11:30–18:00</button>
+      <button type="button" data-fill="start1=10:00|end1=18:00">10:00–18:00</button>
+      ${prev && hasTimes(prev) ? `<button type="button" data-fill="start1=${esc(t5(prev.start1) || '')}|end1=${esc(t5(prev.end1) || '')}|start2=${esc(t5(prev.start2) || '')}|end2=${esc(t5(prev.end2) || '')}|note=${esc(prev.note || '')}">Wie Vortag</button>` : ''}
+      <button type="button" data-fill="start1=|end1=|start2=|end2=">Zeiten löschen</button>
+    </div>
+    <div class="frow"><label>Notiz</label><input type="text" name="note" value="${esc(s.note || '')}" placeholder="z. B. PRECOCE, PANDAS, FLAMINGOS"></div>
+    <div class="chips"><button type="button" data-fill="note=PRECOCE">PRECOCE</button><button type="button" data-fill="note=PANDAS">PANDAS</button><button type="button" data-fill="note=FLAMINGOS">FLAMINGOS</button><button type="button" data-fill="note=">Notiz löschen</button></div>
+    <div class="actions"><button class="primary" type="submit">Speichern</button><button type="button" class="ghost" data-action="newabs" data-emp="${empId}" data-day="${day}">Abwesenheit…</button><span class="spacer"></span>${s.id ? `<button type="button" class="danger" data-action="clearshift" data-id="${s.id}">Eintrag entfernen</button>` : ''}<button type="button" class="ghost" data-action="closemodal">Abbrechen</button></div>
+  </form>`);
+  $('#fShift').addEventListener('submit', async ev => {
+    ev.preventDefault(); const d2 = formData(ev.target);
+    const row = { employee_id: empId, day, start1: d2.start1 || null, end1: d2.end1 || null, start2: d2.start2 || null, end2: d2.end2 || null, note: d2.note || null };
+    if ((row.start1 && !row.end1) || (!row.start1 && row.end1) || (row.start2 && !row.end2) || (!row.start2 && row.end2)) return toast('Bitte immer Von UND Bis eintragen.');
+    if (row.start1 && mins(row.end1) <= mins(row.start1)) return toast('„Bis“ muss nach „Von“ liegen.');
+    if (row.start2 && mins(row.end2) <= mins(row.start2)) return toast('„Bis“ (2. Block) muss nach „Von“ liegen.');
+    const { error } = await sb.from('shifts').upsert(row, { onConflict: 'employee_id,day' });
+    if (error) return toast('Speichern fehlgeschlagen: ' + errMsg(error), 5000);
+    closeModal(); toast('Gespeichert'); loadAll();
+  });
+}
+
+function openAbsenceEditor(absId, empId, day) {
+  const a = absId ? (S.absList.find(x => x.id === absId) || S.absences.find(x => x.id === absId)) : null;
+  const emp = a ? a.employee_id : (empId || '');
+  const fromV = a ? a.from_day : (day || todayIso()); const toV = a ? a.to_day : (day || todayIso());
+  openModal(`<h3>${a ? 'Abwesenheit ändern' : 'Neue Abwesenheit'}</h3><form class="f" id="fAbs">
+    <div class="frow"><label>Wer</label><select name="employee_id" required>${S.employees.map(e => `<option value="${e.id}" ${emp == e.id ? 'selected' : ''}>${esc(e.name)}</option>`).join('')}</select></div>
+    <div class="frow"><label>Von</label><input type="date" name="from_day" value="${esc(fromV)}" required><label style="min-width:auto">bis</label><input type="date" name="to_day" value="${esc(toV)}" required></div>
+    <div class="frow"><label>Art</label><select name="kind">${Object.entries(KINDS).map(([k, v]) => `<option value="${k}" ${a && a.kind === k ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
+    <div class="frow"><label>Notiz</label><input type="text" name="note" value="${esc(a ? a.note || '' : '')}" placeholder="optional"></div>
+    <div class="actions"><button class="primary" type="submit">Speichern</button><span class="spacer"></span>${a ? `<button type="button" class="danger" data-action="delabs" data-id="${a.id}">Löschen</button>` : ''}<button type="button" class="ghost" data-action="closemodal">Abbrechen</button></div></form>`);
+  $('#fAbs').addEventListener('submit', async ev => {
+    ev.preventDefault(); const d2 = formData(ev.target);
+    if (d2.to_day < d2.from_day) return toast('„Bis“ darf nicht vor „Von“ liegen.');
+    const row = { employee_id: +d2.employee_id, from_day: d2.from_day, to_day: d2.to_day, kind: d2.kind, note: d2.note || null };
+    const q = a ? sb.from('absences').update(row).eq('id', a.id) : sb.from('absences').insert(row);
+    const { error } = await q;
+    if (error) return toast('Speichern fehlgeschlagen: ' + errMsg(error), 5000);
+    closeModal(); toast('Gespeichert'); loadAll();
+  });
+}
+
+function openRolesEditor(day) {
+  const d = parseISO(day);
+  openModal(`<h3>Accueil &amp; Schluss<small>${DAY_LONG[(d.getDay() + 6) % 7]}, ${fmtDY(d)}</small></h3><form class="f" id="fRoles">
+    <div class="frow"><label>Accueil</label>${roleSelect(day, 'accueil', roleOf(day, 'accueil')).replace('data-action="setrole"', 'name="accueil"')}</div>
+    <div class="frow"><label>Schluss</label>${roleSelect(day, 'schluss', roleOf(day, 'schluss')).replace('data-action="setrole"', 'name="schluss"')}</div>
+    <div class="actions"><button class="primary" type="submit">Speichern</button><button type="button" class="ghost" data-action="closemodal">Abbrechen</button></div></form>`);
+  $('#fRoles').addEventListener('submit', async ev => {
+    ev.preventDefault(); const d2 = formData(ev.target);
+    const e1 = await setRole(day, 'accueil', d2.accueil); const e2 = await setRole(day, 'schluss', d2.schluss);
+    if (e1 || e2) return toast('Speichern fehlgeschlagen: ' + errMsg(e1 || e2), 5000);
+    closeModal(); toast('Gespeichert'); loadAll();
+  });
+}
+async function setRole(day, role, empId) {
+  if (!empId) { const { error } = await sb.from('day_roles').delete().eq('day', day).eq('role', role); return error; }
+  const { error } = await sb.from('day_roles').upsert({ day, role, employee_id: +empId }, { onConflict: 'day,role' }); return error;
+}
+
+function openEmployeeEditor(id) {
+  const e = id ? empById(id) : { name: '', group_id: S.groups[0] ? S.groups[0].id : null, weekly_hours: 0, sort_order: (Math.max(0, ...S.employees.map(x => x.sort_order || 0)) + 1), active: true, color: null };
+  openModal(`<h3>${id ? 'Mitarbeiter bearbeiten' : 'Neuer Mitarbeiter'}</h3><form class="f" id="fEmp">
+    <div class="frow"><label>Name</label><input type="text" name="name" value="${esc(e.name)}" required></div>
+    <div class="frow"><label>Gruppe</label><select name="group_id"><option value="">– keine –</option>${S.groups.map(g => `<option value="${g.id}" ${e.group_id === g.id ? 'selected' : ''}>${esc(g.name)}</option>`).join('')}</select></div>
+    <div class="frow"><label>Std./Woche</label><input type="number" name="weekly_hours" step="0.5" min="0" max="60" value="${esc(e.weekly_hours)}"></div>
+    <div class="frow"><label>Reihenfolge</label><input type="number" name="sort_order" step="1" value="${esc(e.sort_order)}"></div>
+    <div class="frow"><label>Eigene Farbe</label><input type="color" name="color" value="${esc(e.color || '#a6c9ed')}"><label class="check" style="min-width:auto"><input type="checkbox" name="use_color" ${e.color ? 'checked' : ''}> Farbe verwenden (Name hervorheben)</label></div>
+    <label class="check"><input type="checkbox" name="active" ${e.active !== false ? 'checked' : ''}> Aktiv (im Plan sichtbar)</label>
+    <div class="actions"><button class="primary" type="submit">Speichern</button><span class="spacer"></span>${id ? `<button type="button" class="danger" data-action="delemp" data-id="${id}">Löschen</button>` : ''}<button type="button" class="ghost" data-action="closemodal">Abbrechen</button></div></form>`);
+  $('#fEmp').addEventListener('submit', async ev => {
+    ev.preventDefault(); const d = formData(ev.target); const f = ev.target;
+    const row = { name: d.name, group_id: d.group_id ? +d.group_id : null, weekly_hours: +d.weekly_hours || 0, sort_order: +d.sort_order || 0, active: f.active.checked, color: f.use_color.checked ? d.color : null };
+    const { error } = id ? await sb.from('employees').update(row).eq('id', id) : await sb.from('employees').insert(row);
+    if (error) return toast('Speichern fehlgeschlagen: ' + errMsg(error), 5000);
+    closeModal(); toast('Gespeichert'); loadAll();
+  });
+}
+
+function openGroupEditor(id) {
+  const g = id ? S.groups.find(x => x.id === id) : { name: '', color: '#c7d0dd', sort_order: (Math.max(0, ...S.groups.map(x => x.sort_order || 0)) + 1) };
+  openModal(`<h3>${id ? 'Gruppe bearbeiten' : 'Neue Gruppe'}</h3><form class="f" id="fGroup">
+    <div class="frow"><label>Name</label><input type="text" name="name" value="${esc(g.name)}" required></div>
+    <div class="frow"><label>Farbe</label><input type="color" name="color" value="${esc(g.color)}"><small>helle Farben sind am besten lesbar</small></div>
+    <div class="frow"><label>Reihenfolge</label><input type="number" name="sort_order" step="1" value="${esc(g.sort_order)}"></div>
+    <div class="actions"><button class="primary" type="submit">Speichern</button><span class="spacer"></span>${id ? `<button type="button" class="danger" data-action="delgroup" data-id="${id}">Löschen</button>` : ''}<button type="button" class="ghost" data-action="closemodal">Abbrechen</button></div></form>`);
+  $('#fGroup').addEventListener('submit', async ev => {
+    ev.preventDefault(); const d = formData(ev.target);
+    const row = { name: d.name, color: d.color, sort_order: +d.sort_order || 0 };
+    const { error } = id ? await sb.from('groups').update(row).eq('id', id) : await sb.from('groups').insert(row);
+    if (error) return toast('Speichern fehlgeschlagen: ' + errMsg(error), 5000);
+    closeModal(); toast('Gespeichert'); loadAll();
+  });
+}
+
+function openCopyWeek() {
+  const opts = [];
+  for (let k = -8; k <= 8; k++) { if (k === 0) continue; const ws = addDays(weekStart, k * 7); opts.push(`<option value="${iso(ws)}" ${k === -1 ? 'selected' : ''}>KW ${isoWeek(ws)} (${fmtD(ws)} – ${fmtDY(addDays(ws, 6))})</option>`); }
+  openModal(`<h3>Woche kopieren<small>nach KW ${isoWeek(weekStart)} (${fmtD(weekStart)} – ${fmtDY(addDays(weekStart, 6))})</small></h3><form class="f" id="fCopy">
+    <div class="frow"><label>Von Woche</label><select name="src">${opts.join('')}</select></div>
+    <label class="check"><input type="checkbox" name="replace" checked> Vorhandene Einträge dieser Woche vorher löschen</label>
+    <label class="check"><input type="checkbox" name="roles" checked> Accueil &amp; Schluss mitkopieren</label>
+    <p class="help">Abwesenheiten werden nicht kopiert.</p>
+    <div class="actions"><button class="primary" type="submit">Kopieren</button><button type="button" class="ghost" data-action="closemodal">Abbrechen</button></div></form>`);
+  $('#fCopy').addEventListener('submit', async ev => {
+    ev.preventDefault(); const f = ev.target; const btn = $('button.primary', f); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Kopiere…';
+    try { await copyWeek(parseISO(f.src.value), f.replace.checked, f.roles.checked); closeModal(); toast('Woche kopiert'); loadAll(); }
+    catch (e) { toast('Kopieren fehlgeschlagen: ' + errMsg(e), 6000); btn.disabled = false; btn.textContent = 'Kopieren'; }
+  });
+}
+async function copyWeek(srcStart, replace, withRoles) {
+  const sFrom = iso(srcStart), sTo = iso(addDays(srcStart, 6));
+  const tFrom = iso(weekStart), tTo = iso(addDays(weekStart, 6));
+  const [r1, r2] = await Promise.all([sb.from('shifts').select('*').gte('day', sFrom).lte('day', sTo), sb.from('day_roles').select('*').gte('day', sFrom).lte('day', sTo)]);
+  if (r1.error) throw r1.error; if (r2.error) throw r2.error;
+  const offset = Math.round((weekStart - srcStart) / 86400000);
+  if (replace) {
+    const d1 = await sb.from('shifts').delete().gte('day', tFrom).lte('day', tTo); if (d1.error) throw d1.error;
+    if (withRoles) { const d2 = await sb.from('day_roles').delete().gte('day', tFrom).lte('day', tTo); if (d2.error) throw d2.error; }
+  }
+  const rows = (r1.data || []).filter(s => s.start1 || s.start2 || s.note).map(s => ({ employee_id: s.employee_id, day: iso(addDays(parseISO(s.day), offset)), start1: s.start1, end1: s.end1, start2: s.start2, end2: s.end2, note: s.note }));
+  if (rows.length) { const u = await sb.from('shifts').upsert(rows, { onConflict: 'employee_id,day' }); if (u.error) throw u.error; }
+  if (withRoles) { const rr = (r2.data || []).filter(r => r.employee_id).map(r => ({ day: iso(addDays(parseISO(r.day), offset)), role: r.role, employee_id: r.employee_id })); if (rr.length) { const u = await sb.from('day_roles').upsert(rr, { onConflict: 'day,role' }); if (u.error) throw u.error; } }
+}
+
+function openMenu() {
+  const e = profile.employee_id ? empById(profile.employee_id) : null;
+  openModal(`<h3>Menü<small>Angemeldet als ${esc(profile.display_name || session.user.email)}${e ? ` · ${esc(e.name)}` : ''}${isAdmin ? ' · Admin' : ''}</small></h3>
+    <div class="help"><p><b>Auf dem Handy als App installieren:</b></p><ol><li><b>iPhone:</b> Diese Seite in Safari öffnen → Teilen-Symbol (Quadrat mit Pfeil) → „Zum Home-Bildschirm“.</li><li><b>Android:</b> In Chrome öffnen → Menü ⋮ → „App installieren“ oder „Zum Startbildschirm hinzufügen“.</li></ol></div>
+    <form class="f"><div class="actions"><button type="button" class="ghost" data-action="changepw">Passwort ändern</button><button type="button" class="ghost" data-action="reload">Neu laden</button><span class="spacer"></span><button type="button" class="danger" data-action="logout">Abmelden</button></div></form>`);
+}
+function openChangePw() {
+  openModal(`<h3>Passwort ändern</h3><form class="f" id="fPw"><div class="frow"><label>Neues Passwort</label><input type="password" name="pw" minlength="6" required autocomplete="new-password"></div><div class="frow"><label>Wiederholen</label><input type="password" name="pw2" minlength="6" required autocomplete="new-password"></div>
+    <div class="actions"><button class="primary" type="submit">Speichern</button><button type="button" class="ghost" data-action="closemodal">Abbrechen</button></div></form>`);
+  $('#fPw').addEventListener('submit', async ev => {
+    ev.preventDefault(); const d = formData(ev.target); if (d.pw !== d.pw2) return toast('Die Passwörter stimmen nicht überein.');
+    const { error } = await sb.auth.updateUser({ password: d.pw }); if (error) return toast('Fehlgeschlagen: ' + errMsg(error), 5000);
+    closeModal(); toast('Passwort geändert');
+  });
+}
+
+/* ============================================================
+   Ereignisse
+   ============================================================ */
+$('#prevWeek').addEventListener('click', () => { weekStart = addDays(weekStart, -7); render(); loadAll(); });
+$('#nextWeek').addEventListener('click', () => { weekStart = addDays(weekStart, 7); render(); loadAll(); });
+$('#todayWeek').addEventListener('click', () => { weekStart = mondayOf(new Date()); selDay = Math.min((new Date().getDay() + 6) % 7, days().length - 1); render(); loadAll(); });
+$('#btnReload').addEventListener('click', () => { toast('Aktualisiere…', 1200); loadAll(); });
+$('#btnMenu').addEventListener('click', openMenu);
+$('#tabs').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; view = b.dataset.view; render(); loadAll(); });
+$('#modal').addEventListener('click', e => { if (e.target.id === 'modal') closeModal(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+document.addEventListener('click', async e => {
+  const fill = e.target.closest('[data-fill]');
+  if (fill) { const form = fill.closest('form'); fill.dataset.fill.split('|').forEach(kv => { const i = kv.indexOf('='); const k = kv.slice(0, i), v = kv.slice(i + 1); if (form[k]) form[k].value = v; }); return; }
+  const el = e.target.closest('[data-action]'); if (!el) return;
+  const a = el.dataset.action;
+  if (a === 'selday') { selDay = +el.dataset.i; render(); }
+  else if (a === 'edit') { if (isAdmin) openShiftEditor(+el.dataset.emp, el.dataset.day); }
+  else if (a === 'editroles') { if (isAdmin) openRolesEditor(el.dataset.day); }
+  else if (a === 'newabs') { openAbsenceEditor(null, el.dataset.emp ? +el.dataset.emp : null, el.dataset.day || null); }
+  else if (a === 'editabs') openAbsenceEditor(+el.dataset.id);
+  else if (a === 'delabs') { if (confirm('Diese Abwesenheit löschen?')) { const { error } = await sb.from('absences').delete().eq('id', +el.dataset.id); if (error) return toast('Löschen fehlgeschlagen: ' + errMsg(error), 5000); closeModal(); toast('Gelöscht'); loadAll(); } }
+  else if (a === 'clearshift') { if (confirm('Eintrag für diesen Tag entfernen?')) { const { error } = await sb.from('shifts').update({ start1: null, end1: null, start2: null, end2: null, note: null }).eq('id', +el.dataset.id); if (error) return toast('Fehlgeschlagen: ' + errMsg(error), 5000); closeModal(); toast('Entfernt'); loadAll(); } }
+  else if (a === 'newemp') openEmployeeEditor(null);
+  else if (a === 'editemp') openEmployeeEditor(+el.dataset.id);
+  else if (a === 'delemp') { const emp = empById(+el.dataset.id); if (confirm(`„${emp.name}“ wirklich löschen? Alle Dienste und Abwesenheiten dieser Person werden mitgelöscht. (Tipp: stattdessen „Aktiv“ abwählen.)`)) { const { error } = await sb.from('employees').delete().eq('id', emp.id); if (error) return toast('Löschen fehlgeschlagen: ' + errMsg(error), 5000); closeModal(); toast('Gelöscht'); loadAll(); } }
+  else if (a === 'newgroup') openGroupEditor(null);
+  else if (a === 'editgroup') openGroupEditor(+el.dataset.id);
+  else if (a === 'delgroup') { if (confirm('Gruppe löschen? Die Mitarbeiter bleiben erhalten (ohne Gruppe).')) { const { error } = await sb.from('groups').delete().eq('id', +el.dataset.id); if (error) return toast('Löschen fehlgeschlagen: ' + errMsg(error), 5000); closeModal(); toast('Gelöscht'); loadAll(); } }
+  else if (a === 'copyweek') openCopyWeek();
+  else if (a === 'print') window.print();
+  else if (a === 'closemodal') closeModal();
+  else if (a === 'changepw') openChangePw();
+  else if (a === 'reload') location.reload();
+  else if (a === 'logout') { closeModal(); await sb.auth.signOut(); }
+});
+
+document.addEventListener('change', async e => {
+  const el = e.target.closest('[data-action]'); if (!el) return;
+  const a = el.dataset.action;
+  if (a === 'setrole') { const err = await setRole(el.dataset.day, el.dataset.role, el.value); if (err) toast('Fehlgeschlagen: ' + errMsg(err), 5000); else { toast('Gespeichert'); loadAll(); } }
+  else if (a === 'onlyworking') { onlyWorking = el.checked; try { localStorage.setItem('mr_onlyWorking', onlyWorking ? '1' : '0'); } catch (x) { } render(); }
+  else if (a === 'absfilter') { S.absFilter = el.value; render(); }
+  else if (a === 'linkprofile') { const { error } = await sb.from('profiles').update({ employee_id: el.value ? +el.value : null }).eq('user_id', el.dataset.uid); if (error) toast('Fehlgeschlagen: ' + errMsg(error), 5000); else { toast('Zugeordnet'); await loadProfiles(); render(); } }
+  else if (a === 'setadmin') { const { error } = await sb.from('profiles').update({ is_admin: el.checked }).eq('user_id', el.dataset.uid); if (error) { toast('Fehlgeschlagen: ' + errMsg(error), 5000); el.checked = !el.checked; } else { toast(el.checked ? 'Ist jetzt Admin' : 'Admin-Recht entfernt'); await loadProfiles(); render(); } }
+});
+
+document.addEventListener('submit', async e => {
+  if (e.target.id !== 'fSettings') return;
+  e.preventDefault(); const d = formData(e.target);
+  const rows = ['title', 'early_time', 'late_time', 'warn_time', 'days_per_week', 'change_days', 'invite_code'].map(k => ({ key: k, value: d[k] ?? '' }));
+  const { error } = await sb.from('settings').upsert(rows, { onConflict: 'key' });
+  if (error) return toast('Speichern fehlgeschlagen: ' + errMsg(error), 5000);
+  toast('Einstellungen gespeichert'); loadAll();
+});
+
+init();
+</script>
+</body>
+</html>

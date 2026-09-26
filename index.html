@@ -178,7 +178,7 @@ form.f label{font-size:13px;color:var(--muted);min-width:78px}
 form.f input,form.f select{padding:9px 10px;border:1px solid var(--line);border-radius:8px;font-size:16px;background:#fff}
 form.f input[type=time]{width:112px}
 form.f input[type=date]{width:160px}
-form.f input[type=text],form.f input[type=number],form.f select{flex:1;min-width:140px}
+form.f input[type=text],form.f input[type=email],form.f input[type=number],form.f select{flex:1;min-width:140px}
 form.f input[type=number]{max-width:120px}
 form.f input[type=color]{width:52px;height:38px;padding:2px}
 form.f .chips{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}
@@ -187,6 +187,11 @@ form.f .actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
 form.f .actions .spacer{flex:1}
 form.f .check{display:flex;align-items:center;gap:8px;margin:8px 0}
 form.f .check input{width:auto}
+button.sm{padding:5px 8px;font-size:13px}
+td.acts{white-space:nowrap}td.acts button{margin-right:4px}
+.muted{color:var(--muted)}
+.cred{display:flex;flex-wrap:wrap;gap:10px;margin:10px 0}.cred>div{flex:1;min-width:160px;background:#f7f9fb;border:1px solid var(--line);border-radius:8px;padding:8px 12px}.cred small{display:block;color:var(--muted);font-size:12px}.cred b{font-size:18px;word-break:break-all;user-select:all}
+form.f .frow>span{font-size:15px}
 
 /* ---------- Modal ---------- */
 .modal{position:fixed;inset:0;background:rgba(10,20,35,.55);z-index:50;display:flex;align-items:flex-end;justify-content:center;padding:0}
@@ -307,7 +312,8 @@ const t5 = t => (t ? String(t).slice(0, 5) : null);
 const fmtT = t => { if (!t) return ''; const [h, m] = t5(t).split(':'); return `${+h}:${m}`; };
 const mins = t => { if (!t) return null; const [h, m] = t5(t).split(':').map(Number); return h * 60 + m; };
 const fmtH = h => (Math.round(h * 100) / 100).toLocaleString('de-DE', { maximumFractionDigits: 2 });
-const DAY_LABELS = ['LU', 'MA', 'ME', 'JE', 'VE', 'SA', 'DI'];
+const DAY_SETS = { fr: ['LU', 'MA', 'ME', 'JE', 'VE', 'SA', 'DI'], de: ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'], lb: ['Méi', 'Dën', 'Mët', 'Don', 'Fre', 'Sam', 'Son'] };
+const DAY_LABELS = i => (DAY_SETS[S.settings.day_labels] || DAY_SETS.fr)[i];
 const DAY_LONG = ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag'];
 const KINDS = { urlaub: 'Congé', krank: 'Krank', formatioun: 'Formatioun', frei: 'Fräi', sonstiges: 'Sonstiges' };
 const todayIso = () => iso(new Date());
@@ -327,7 +333,7 @@ let selDay = Math.min((new Date().getDay() + 6) % 7, 4);
 let view = 'plan';
 let lastSeen = null;
 let onlyWorking = false;
-const S = { groups: [], employees: [], shifts: [], absences: [], absPublic: [], roles: [], settings: {}, profiles: [], absList: [], hoursRange: null, hoursShifts: [], hoursAbs: [] };
+const S = { groups: [], employees: [], shifts: [], absences: [], absPublic: [], roles: [], settings: {}, profiles: [], users: null, usersErr: '', absList: [], hoursRange: null, hoursShifts: [], hoursAbs: [] };
 
 try { lastSeen = +localStorage.getItem('mr_lastSeen') || null; onlyWorking = localStorage.getItem('mr_onlyWorking') === '1'; } catch (e) { }
 
@@ -374,7 +380,7 @@ $('#fLogin').addEventListener('submit', async e => {
 });
 function loginError(error) {
   const m = errMsg(error);
-  if (/invalid login credentials/i.test(m)) return 'E-Mail oder Passwort ist falsch.';
+  if (/invalid login credentials/i.test(m)) return 'E-Mail oder Passwort ist falsch. Passwort vergessen? Die Leitung kann dir ein neues geben.';
   if (/email not confirmed/i.test(m)) return 'Die E-Mail-Adresse ist noch nicht bestätigt. Bitte den Admin fragen.';
   if (/rate limit/i.test(m)) return 'Zu viele Versuche. Bitte kurz warten.';
   return 'Anmeldung fehlgeschlagen: ' + m;
@@ -431,7 +437,28 @@ async function loadAll() {
   loading = false;
   if (loadAgain) { loadAgain = false; loadAll(); }
 }
-async function loadProfiles() { const { data } = await sb.from('profiles').select('*').order('display_name'); S.profiles = data || []; }
+async function loadProfiles() {
+  // Erst die Login-Liste vom Server (E-Mail, letzte Anmeldung; legt fehlende Profile an), dann die Profile
+  const r = await adminFn({ action: 'list' });
+  S.users = r.ok ? Object.fromEntries((r.users || []).map(u => [u.id, u])) : null; S.usersErr = r.ok ? '' : r.error;
+  const { data } = await sb.from('profiles').select('*').order('display_name'); S.profiles = data || [];
+}
+/* Ruft die Admin-Funktion auf dem Server auf (Logins verwalten). Gibt immer { ok, ... } zurück. */
+async function adminFn(body) {
+  try {
+    const { data, error } = await sb.functions.invoke('admin-users', { body });
+    if (error) {
+      let msg = errMsg(error);
+      try { const ctx = error.context; if (ctx && typeof ctx.json === 'function') { const j = await ctx.json(); if (j && j.error) msg = j.error; } } catch (x) { }
+      if (/failed to send|failed to fetch|networkerror/i.test(msg)) msg = 'Keine Verbindung zum Server. Internetverbindung prüfen.';
+      return { ok: false, error: msg };
+    }
+    if (data && data.error) return { ok: false, error: data.error };
+    return Object.assign({ ok: true }, data || {});
+  } catch (e) { return { ok: false, error: errMsg(e) }; }
+}
+function genPw() { const a = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'; const arr = new Uint32Array(10); crypto.getRandomValues(arr); return Array.from(arr, n => a[n % a.length]).join(''); }
+function userEmail(uid) { const u = S.users && S.users[uid]; const p = S.profiles.find(x => x.user_id === uid); return (u && u.email) || (uid === session.user.id ? session.user.email : '') || (p && p.display_name) || uid; }
 function monthRange(offset) { const d = new Date(); const from = new Date(d.getFullYear(), d.getMonth() + offset, 1); const to = new Date(d.getFullYear(), d.getMonth() + offset + 1, 0); return { from: iso(from), to: iso(to) }; }
 async function loadHours() {
   const r = S.hoursRange || (S.hoursRange = monthRange(0));
@@ -456,7 +483,7 @@ function setupRealtime() {
 /* ============================================================
    Abgeleitete Daten
    ============================================================ */
-function days() { const n = Math.min(7, Math.max(5, +S.settings.days_per_week || 5)); return Array.from({ length: n }, (_, i) => { const d = addDays(weekStart, i); return { i, date: d, iso: iso(d), label: DAY_LABELS[i], long: DAY_LONG[i] }; }); }
+function days() { const n = Math.min(7, Math.max(5, +S.settings.days_per_week || 5)); return Array.from({ length: n }, (_, i) => { const d = addDays(weekStart, i); return { i, date: d, iso: iso(d), label: DAY_LABELS(i), long: DAY_LONG[i] }; }); }
 function empById(id) { return S.employees.find(e => e.id === id); }
 function shiftOf(empId, day) { return S.shifts.find(s => s.employee_id === empId && s.day === day); }
 function absOf(empId, day) {
@@ -661,16 +688,72 @@ function renderEmployees() {
 
 /* ---------- Logins ---------- */
 function renderLogins() {
-  const url = location.origin + location.pathname;
+  const url = location.origin + location.pathname; const ok = !!S.users;
+  const fmtTs = ts => { if (!ts) return '<span class="muted">noch nie</span>'; const d = new Date(ts); return `${fmtDY(d)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
   let h = `<div class="card"><h2>Logins <span class="cnt">(${S.profiles.length})</span></h2>
-  <div class="noteinfo"><b>So bekommen Kollegen Zugang:</b><ol><li>Link auf dem Handy öffnen: <code class="url">${esc(url)}</code></li><li>Auf „Registrieren“ tippen, Name, E-Mail, Passwort und den Einladungscode <b>${esc(S.settings.invite_code || '(kein Code gesetzt – jeder kann sich registrieren)')}</b> eingeben.</li><li>Dann hier unten den neuen Login dem richtigen Namen im Plan zuordnen.</li></ol>
-  Passwort vergessen? Login im Supabase-Dashboard (Authentication → Users) löschen, die Person registriert sich einfach neu.</div>
-  <table class="list"><thead><tr><th>Login</th><th>Name im Plan</th><th>Admin</th></tr></thead><tbody>`;
+  <div class="toolbar"><button class="primary" data-action="newlogin" ${ok ? '' : 'disabled'}>+ Neuer Login</button></div>
+  <div class="noteinfo"><b>So bekommen Kollegen Zugang:</b><ol><li>Hier auf „+ Neuer Login“: E-Mail-Adresse der Person, ein Startpasswort und den Namen im Plan eingeben.</li><li>Der Person E-Mail und Startpasswort geben. Sie meldet sich an unter <code class="url">${esc(url)}</code> und ändert das Passwort im Menü ☰.</li><li>Passwort vergessen? Bei der Person auf „Passwort“ klicken und ein neues vergeben.</li><li>Jemand arbeitet nicht mehr hier? „Löschen“ – der Name im Plan und alle Dienste bleiben erhalten.</li></ol>
+  Kollegen können sich auch selbst registrieren, mit dem Einladungscode <b>${esc(S.settings.invite_code || '(kein Code gesetzt – jeder kann sich registrieren)')}</b> (siehe Einstellungen). Danach hier den Login dem Namen im Plan zuordnen.</div>`;
+  if (!ok) h += `<div class="err">Die Login-Verwaltung ist gerade nicht erreichbar${S.usersErr ? ': ' + esc(S.usersErr) : ''}. Zuordnen und Admin-Recht funktionieren trotzdem; für Anlegen, Passwort, E-Mail und Löschen bitte später erneut versuchen (↻).</div>`;
+  h += `<table class="list logins"><thead><tr><th>E-Mail (Login)</th><th>Name</th><th>Name im Plan</th><th>Admin</th><th>Letzte Anmeldung</th><th></th></tr></thead><tbody>`;
   for (const p of S.profiles) {
-    const me = p.user_id === session.user.id;
-    h += `<tr><td><b>${esc(p.display_name || p.user_id)}</b>${me ? ' <small>(du)</small>' : ''}</td><td><select data-action="linkprofile" data-uid="${p.user_id}"><option value="">– nicht zugeordnet –</option>${S.employees.map(e => `<option value="${e.id}" ${p.employee_id === e.id ? 'selected' : ''}>${esc(e.name)}</option>`).join('')}</select></td><td><input type="checkbox" data-action="setadmin" data-uid="${p.user_id}" ${p.is_admin ? 'checked' : ''} ${me ? 'disabled title="Du kannst dir selbst das Admin-Recht nicht entziehen"' : ''}></td></tr>`;
+    const me = p.user_id === session.user.id; const u = S.users && S.users[p.user_id];
+    const email = (u && u.email) || (me ? session.user.email : '');
+    h += `<tr><td><b>${esc(email || p.display_name || p.user_id)}</b>${me ? ' <small>(du)</small>' : ''}</td><td>${esc(p.display_name || '')}</td><td><select data-action="linkprofile" data-uid="${p.user_id}"><option value="">– nicht zugeordnet –</option>${S.employees.map(e => `<option value="${e.id}" ${p.employee_id === e.id ? 'selected' : ''}>${esc(e.name)}</option>`).join('')}</select></td><td><input type="checkbox" data-action="setadmin" data-uid="${p.user_id}" ${p.is_admin ? 'checked' : ''} ${me ? 'disabled title="Du kannst dir selbst das Admin-Recht nicht entziehen"' : ''}></td><td>${u ? fmtTs(u.last_sign_in_at) : (ok ? '<span class="muted">kein Login</span>' : '–')}</td><td class="acts">${ok ? `<button class="ghost sm" data-action="setpw" data-uid="${p.user_id}">Passwort</button><button class="ghost sm" data-action="setemail" data-uid="${p.user_id}">E-Mail</button><button class="danger sm" data-action="deluser" data-uid="${p.user_id}" ${me ? 'disabled title="Den eigenen Login kann man nicht löschen"' : ''}>Löschen</button>` : ''}</td></tr>`;
   }
   return h + '</tbody></table></div>';
+}
+function credBox(email, pw, intro) {
+  return `<div class="noteinfo">${intro}</div><div class="cred"><div><small>E-Mail</small><b>${esc(email)}</b></div><div><small>Passwort</small><b>${esc(pw)}</b></div></div>
+    <div class="actions"><button type="button" class="primary" data-action="copytext" data-text="${esc(`Schaffplang-Zugang\nAdresse: ${location.origin + location.pathname}\nE-Mail: ${email}\nPasswort: ${pw}\nBitte nach der ersten Anmeldung das Passwort im Menü ☰ ändern.`)}">Zugangsdaten kopieren</button><button type="button" class="ghost" data-action="closemodal">Schließen</button></div>`;
+}
+function openNewLogin() {
+  const pw = genPw();
+  openModal(`<h3>Neuer Login<small>Die Person bekommt E-Mail und Startpasswort von dir</small></h3><form class="f" id="fNewLogin">
+    <div class="frow"><label>E-Mail</label><input type="email" name="email" required autocomplete="off" placeholder="name@beispiel.lu"></div>
+    <div class="frow"><label>Name</label><input type="text" name="name" placeholder="z. B. Kevin" autocomplete="off"><small>wird beim Login angezeigt</small></div>
+    <div class="frow"><label>Startpasswort</label><input type="text" name="password" minlength="6" required value="${esc(pw)}" autocomplete="off"><button type="button" class="ghost" data-action="genpw">Neu vorschlagen</button></div>
+    <div class="frow"><label>Name im Plan</label><select name="employee_id"><option value="">– nicht zugeordnet –</option>${S.employees.filter(e => e.active !== false).map(e => `<option value="${e.id}">${esc(e.name)}</option>`).join('')}</select></div>
+    <label class="check"><input type="checkbox" name="is_admin"> Admin (darf den Plan bearbeiten und Logins verwalten)</label>
+    <div class="actions"><button class="primary" type="submit">Login anlegen</button><button type="button" class="ghost" data-action="closemodal">Abbrechen</button></div></form>`);
+  $('#fNewLogin').addEventListener('submit', async ev => {
+    ev.preventDefault(); const f = ev.target; const d = formData(f); const btn = $('button[type=submit]', f); btn.disabled = true;
+    const r = await adminFn({ action: 'create_user', email: d.email, password: d.password, name: d.name, employee_id: d.employee_id || null, is_admin: !!d.is_admin });
+    btn.disabled = false;
+    if (!r.ok) return toast('Anlegen fehlgeschlagen: ' + r.error, 6000);
+    if (r.warning) toast(r.warning, 6000);
+    await loadProfiles(); render();
+    openModal(`<h3>Login angelegt</h3>${credBox(d.email.toLowerCase(), d.password, 'Gib der Person diese Zugangsdaten. Sie meldet sich damit an und ändert das Passwort im Menü ☰. Das Passwort wird hier <b>nicht</b> noch einmal angezeigt.')}`);
+  });
+}
+function openSetPw(uid) {
+  const email = userEmail(uid); const pw = genPw();
+  openModal(`<h3>Neues Passwort<small>${esc(email)}</small></h3><form class="f" id="fSetPw">
+    <div class="frow"><label>Passwort</label><input type="text" name="password" minlength="6" required value="${esc(pw)}" autocomplete="off"><button type="button" class="ghost" data-action="genpw">Neu vorschlagen</button></div>
+    <p class="help">Das alte Passwort gilt danach nicht mehr. Die Person meldet sich mit dem neuen Passwort an und kann es im Menü ☰ wieder ändern.</p>
+    <div class="actions"><button class="primary" type="submit">Passwort setzen</button><button type="button" class="ghost" data-action="closemodal">Abbrechen</button></div></form>`);
+  $('#fSetPw').addEventListener('submit', async ev => {
+    ev.preventDefault(); const d = formData(ev.target); const btn = $('button[type=submit]', ev.target); btn.disabled = true;
+    const r = await adminFn({ action: 'set_password', user_id: uid, password: d.password }); btn.disabled = false;
+    if (!r.ok) return toast('Fehlgeschlagen: ' + r.error, 6000);
+    openModal(`<h3>Passwort gesetzt</h3>${credBox(email, d.password, 'Gib der Person das neue Passwort. Es wird hier <b>nicht</b> noch einmal angezeigt.')}`);
+  });
+}
+function openSetEmail(uid) {
+  const me = uid === session.user.id; const email = userEmail(uid);
+  openModal(`<h3>E-Mail-Adresse ändern<small>${me ? 'Dein Login' : esc(email)}</small></h3><form class="f" id="fSetEmail">
+    <div class="frow"><label>Bisher</label><span>${esc(email)}</span></div>
+    <div class="frow"><label>Neue E-Mail</label><input type="email" name="email" required autocomplete="off"></div>
+    <p class="help">Die neue Adresse gilt sofort für die Anmeldung; das Passwort bleibt gleich.${me ? ' Du bleibst angemeldet.' : ''}</p>
+    <div class="actions"><button class="primary" type="submit">Ändern</button><button type="button" class="ghost" data-action="closemodal">Abbrechen</button></div></form>`);
+  $('#fSetEmail').addEventListener('submit', async ev => {
+    ev.preventDefault(); const d = formData(ev.target); const btn = $('button[type=submit]', ev.target); btn.disabled = true;
+    const r = await adminFn({ action: 'set_email', user_id: uid, email: d.email }); btn.disabled = false;
+    if (!r.ok) return toast('Fehlgeschlagen: ' + r.error, 6000);
+    closeModal(); toast(r.unchanged ? 'Die Adresse war schon eingetragen.' : 'E-Mail-Adresse geändert: ' + d.email.toLowerCase(), 4000);
+    if (me) { try { const { data } = await sb.auth.refreshSession(); if (data && data.session) session = data.session; } catch (x) { } await afterLogin(); }
+    else if (view === 'logins') { await loadProfiles(); render(); }
+  });
 }
 
 /* ---------- Stunden (Auswertung) ---------- */
@@ -808,6 +891,7 @@ function renderSettings() {
     <div class="frow"><label>Schluss</label><input type="time" name="late_time" value="${esc(t5(s.late_time) || '')}"><small>wird rot markiert (z. B. 19:00)</small></div>
     <div class="frow"><label>Warnzeit</label><input type="time" name="warn_time" value="${esc(t5(s.warn_time) || '')}"><small>wird orange markiert (z. B. 18:30)</small></div>
     <div class="frow"><label>Wochentage</label><select name="days_per_week"><option value="5" ${s.days_per_week == 5 ? 'selected' : ''}>Montag – Freitag</option><option value="6" ${s.days_per_week == 6 ? 'selected' : ''}>Montag – Samstag</option><option value="7" ${s.days_per_week == 7 ? 'selected' : ''}>Montag – Sonntag</option></select></div>
+    <div class="frow"><label>Tage anzeigen als</label><select name="day_labels"><option value="fr" ${(s.day_labels || 'fr') === 'fr' ? 'selected' : ''}>Französisch (LU MA ME JE VE)</option><option value="de" ${s.day_labels === 'de' ? 'selected' : ''}>Deutsch (Mo Di Mi Do Fr)</option><option value="lb" ${s.day_labels === 'lb' ? 'selected' : ''}>Luxemburgisch (Méi Dën Mët Don Fre)</option></select><small>Kürzel im Plan und im PDF</small></div>
     <div class="frow"><label>Stunden sichtbar für</label><select name="hours_visibility"><option value="admin" ${(s.hours_visibility || 'admin') === 'admin' ? 'selected' : ''}>nur Admin</option><option value="own" ${s.hours_visibility === 'own' ? 'selected' : ''}>jeder nur die eigenen Stunden</option><option value="all" ${s.hours_visibility === 'all' ? 'selected' : ''}>alle sehen alle Stunden</option></select><small>Spalte „Std.“ und Stunden in „Meine Woche“</small></div>
     <div class="frow"><label>Änderungen</label><input type="number" name="change_days" min="0" max="30" value="${esc(s.change_days ?? 3)}"><small>Tage lang gelb markieren (0 = aus)</small></div>
     <div class="frow"><label>Einladungscode</label><input type="text" name="invite_code" value="${esc(s.invite_code || '')}"><small>für die Registrierung neuer Kollegen (leer = jeder darf)</small></div>
@@ -959,7 +1043,7 @@ function openMenu() {
   const e = profile.employee_id ? empById(profile.employee_id) : null;
   openModal(`<h3>Menü<small>Angemeldet als ${esc(profile.display_name || session.user.email)}${e ? ` · ${esc(e.name)}` : ''}${isAdmin ? ' · Admin' : ''}</small></h3>
     <div class="help"><p><b>Auf dem Handy als App installieren:</b></p><ol><li><b>iPhone:</b> Diese Seite in Safari öffnen → Teilen-Symbol (Quadrat mit Pfeil) → „Zum Home-Bildschirm“.</li><li><b>Android:</b> In Chrome öffnen → Menü ⋮ → „App installieren“ oder „Zum Startbildschirm hinzufügen“.</li></ol></div>
-    <form class="f"><div class="actions"><button type="button" class="ghost" data-action="changepw">Passwort ändern</button><button type="button" class="ghost" data-action="reload">Neu laden</button><span class="spacer"></span><button type="button" class="danger" data-action="logout">Abmelden</button></div></form>`);
+    <form class="f"><div class="actions"><button type="button" class="ghost" data-action="changepw">Passwort ändern</button>${isAdmin ? '<button type="button" class="ghost" data-action="changeemail">E-Mail ändern</button>' : ''}<button type="button" class="ghost" data-action="reload">Neu laden</button><span class="spacer"></span><button type="button" class="danger" data-action="logout">Abmelden</button></div></form>`);
 }
 function openChangePw() {
   openModal(`<h3>Passwort ändern</h3><form class="f" id="fPw"><div class="frow"><label>Neues Passwort</label><input type="password" name="pw" minlength="6" required autocomplete="new-password"></div><div class="frow"><label>Wiederholen</label><input type="password" name="pw2" minlength="6" required autocomplete="new-password"></div>
@@ -1009,6 +1093,13 @@ document.addEventListener('click', async e => {
   else if (a === 'print') window.print();
   else if (a === 'closemodal') closeModal();
   else if (a === 'changepw') openChangePw();
+  else if (a === 'changeemail') openSetEmail(session.user.id);
+  else if (a === 'newlogin') openNewLogin();
+  else if (a === 'setpw') openSetPw(el.dataset.uid);
+  else if (a === 'setemail') openSetEmail(el.dataset.uid);
+  else if (a === 'deluser') { const email = userEmail(el.dataset.uid); if (confirm(`Login „${email}“ wirklich löschen? Die Person kann sich danach nicht mehr anmelden. Ihr Name im Plan, ihre Dienste und Abwesenheiten bleiben erhalten.`)) { const r = await adminFn({ action: 'delete_user', user_id: el.dataset.uid }); if (!r.ok) return toast('Löschen fehlgeschlagen: ' + r.error, 6000); toast('Login gelöscht'); await loadProfiles(); render(); } }
+  else if (a === 'genpw') { const inp = el.parentElement.querySelector('input[name=password]'); if (inp) inp.value = genPw(); }
+  else if (a === 'copytext') { const t = el.dataset.text; try { await navigator.clipboard.writeText(t); toast('Kopiert – z. B. in eine Nachricht einfügen'); } catch (x) { window.prompt('Zum Kopieren markieren:', t.replace(/\n/g, ' | ')); } }
   else if (a === 'reload') location.reload();
   else if (a === 'logout') { closeModal(); await sb.auth.signOut(); }
 });
@@ -1027,7 +1118,7 @@ document.addEventListener('submit', async e => {
   if (e.target.id === 'fHours') { e.preventDefault(); const d = formData(e.target); if (!d.from || !d.to || d.to < d.from) return toast('„Bis“ darf nicht vor „Von“ liegen.'); S.hoursRange = { from: d.from, to: d.to }; loadAll(); return; }
   if (e.target.id !== 'fSettings') return;
   e.preventDefault(); const d = formData(e.target);
-  const rows = ['title', 'early_time', 'late_time', 'warn_time', 'days_per_week', 'change_days', 'invite_code', 'hours_visibility'].map(k => ({ key: k, value: d[k] ?? '' }));
+  const rows = ['title', 'early_time', 'late_time', 'warn_time', 'days_per_week', 'day_labels', 'change_days', 'invite_code', 'hours_visibility'].map(k => ({ key: k, value: d[k] ?? '' }));
   const { error } = await sb.from('settings').upsert(rows, { onConflict: 'key' });
   if (error) return toast('Speichern fehlgeschlagen: ' + errMsg(error), 5000);
   toast('Einstellungen gespeichert'); loadAll();

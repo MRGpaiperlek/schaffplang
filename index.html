@@ -470,6 +470,8 @@ function sections() {
   if (rest.length) out.push({ g: { id: 0, name: 'Ohne Gruppe', color: '#e5e7eb' }, emps: rest });
   return out;
 }
+function hoursVisible(emp) { const v = S.settings.hours_visibility || 'admin'; if (isAdmin || v === 'all') return true; if (v === 'own') return !!(emp && profile && profile.employee_id === emp.id); return false; }
+function hoursColumn() { const v = S.settings.hours_visibility || 'admin'; return isAdmin || v !== 'admin'; }
 function timeCls(t, kind) {
   const v = t5(t);
   if (kind === 'start' && v === t5(S.settings.early_time)) return 'early';
@@ -538,7 +540,7 @@ function renderMyWeek(D) {
   if (!profile || !profile.employee_id) return '';
   const e = empById(profile.employee_id); if (!e) return '';
   const target = +e.weekly_hours || 0;
-  return `<div class="mycard"><div class="myhead"><span>Meine Woche – ${esc(e.name)}</span><small>${fmtH(weekHours(e))} h${target ? ` / ${fmtH(target)} h` : ''}</small></div><div class="mydays">${D.map(d => `<div class="myday ${d.iso === todayIso() ? 'today' : ''}"><b>${d.label}</b><small>${fmtD(d.date)}</small>${cellHtml(e, d)}</div>`).join('')}</div></div>`;
+  return `<div class="mycard"><div class="myhead"><span>Meine Woche – ${esc(e.name)}</span>${hoursVisible(e) ? `<small>${fmtH(weekHours(e))} h${target ? ` / ${fmtH(target)} h` : ''}</small>` : ''}</div><div class="mydays">${D.map(d => `<div class="myday ${d.iso === todayIso() ? 'today' : ''}"><b>${d.label}</b><small>${fmtD(d.date)}</small>${cellHtml(e, d)}</div>`).join('')}</div></div>`;
 }
 
 function renderDayList(d, secs) {
@@ -566,19 +568,19 @@ function roleSelect(day, role, cur) {
 
 function renderGrid(D, secs) {
   const ti = todayIso();
-  let h = `<thead><tr><th class="name">Name</th>${D.map(d => `<th class="${d.iso === ti ? 'today' : ''}">${d.label}<small>${fmtD(d.date)}</small></th>`).join('')}<th class="hrs">Std.</th></tr></thead><tbody>`;
+  let h = `<thead><tr><th class="name">Name</th>${D.map(d => `<th class="${d.iso === ti ? 'today' : ''}">${d.label}<small>${fmtD(d.date)}</small></th>`).join('')}${hoursColumn() ? '<th class="hrs">Std.</th>' : ''}</tr></thead><tbody>`;
   for (const { g, emps } of secs) {
-    h += `<tr class="grp" style="--gc:${esc(g.color)}"><td colspan="${D.length + 2}">${esc(g.name)}</td></tr>`;
+    h += `<tr class="grp" style="--gc:${esc(g.color)}"><td colspan="${D.length + (hoursColumn() ? 2 : 1)}">${esc(g.name)}</td></tr>`;
     for (const e of emps) {
       const wh = weekHours(e); const target = +e.weekly_hours || 0;
       const hcls = target && Math.abs(wh - target) > 0.01 ? (wh > target ? 'over' : 'under') : '';
-      h += `<tr class="emp ${profile.employee_id === e.id ? 'me' : ''}" style="--gc:${esc(e.color || g.color)}"><td class="name"><span class="nm" style="${e.color ? `background:${esc(e.color)}` : ''}">${esc(e.name)}</span></td>${D.map(d => `<td class="${d.iso === ti ? 'today' : ''}">${cellHtml(e, d)}</td>`).join('')}<td class="hrs ${hcls}" title="Soll: ${target} h">${fmtH(wh)}${target ? `<small>/${fmtH(target)}</small>` : ''}</td></tr>`;
+      h += `<tr class="emp ${profile.employee_id === e.id ? 'me' : ''}" style="--gc:${esc(e.color || g.color)}"><td class="name"><span class="nm" style="${e.color ? `background:${esc(e.color)}` : ''}">${esc(e.name)}</span></td>${D.map(d => `<td class="${d.iso === ti ? 'today' : ''}">${cellHtml(e, d)}</td>`).join('')}${hoursColumn() ? `<td class="hrs ${hoursVisible(e) ? hcls : ''}" title="${hoursVisible(e) ? `Soll: ${target} h` : ''}">${hoursVisible(e) ? fmtH(wh) + (target ? `<small>/${fmtH(target)}</small>` : '') : ''}</td>` : ''}</tr>`;
     }
   }
   for (const role of ['accueil', 'schluss']) {
-    h += `<tr class="role"><td class="name">${role === 'accueil' ? 'Accueil' : 'Schluss'}</td>${D.map(d => { const r = roleOf(d.iso, role); return `<td>${isAdmin ? roleSelect(d.iso, role, r) : `<span class="rolename">${r ? esc(r.name) : '–'}</span>`}</td>`; }).join('')}<td></td></tr>`;
+    h += `<tr class="role"><td class="name">${role === 'accueil' ? 'Accueil' : 'Schluss'}</td>${D.map(d => { const r = roleOf(d.iso, role); return `<td>${isAdmin ? roleSelect(d.iso, role, r) : `<span class="rolename">${r ? esc(r.name) : '–'}</span>`}</td>`; }).join('')}${hoursColumn() ? '<td></td>' : ''}</tr>`;
   }
-  h += `<tr class="count"><td class="name">Personen</td>${D.map(d => `<td>${countWorking(d.iso)}</td>`).join('')}<td></td></tr>`;
+  h += `<tr class="count"><td class="name">Personen</td>${D.map(d => `<td>${countWorking(d.iso)}</td>`).join('')}${hoursColumn() ? '<td></td>' : ''}</tr>`;
   return h + '</tbody>';
 }
 
@@ -669,6 +671,7 @@ function renderSettings() {
     <div class="frow"><label>Schluss</label><input type="time" name="late_time" value="${esc(t5(s.late_time) || '')}"><small>wird rot markiert (z. B. 19:00)</small></div>
     <div class="frow"><label>Warnzeit</label><input type="time" name="warn_time" value="${esc(t5(s.warn_time) || '')}"><small>wird orange markiert (z. B. 18:30)</small></div>
     <div class="frow"><label>Wochentage</label><select name="days_per_week"><option value="5" ${s.days_per_week == 5 ? 'selected' : ''}>Montag – Freitag</option><option value="6" ${s.days_per_week == 6 ? 'selected' : ''}>Montag – Samstag</option><option value="7" ${s.days_per_week == 7 ? 'selected' : ''}>Montag – Sonntag</option></select></div>
+    <div class="frow"><label>Stunden sichtbar für</label><select name="hours_visibility"><option value="admin" ${(s.hours_visibility || 'admin') === 'admin' ? 'selected' : ''}>nur Admin</option><option value="own" ${s.hours_visibility === 'own' ? 'selected' : ''}>jeder nur die eigenen Stunden</option><option value="all" ${s.hours_visibility === 'all' ? 'selected' : ''}>alle sehen alle Stunden</option></select><small>Spalte „Std.“ und Stunden in „Meine Woche“</small></div>
     <div class="frow"><label>Änderungen</label><input type="number" name="change_days" min="0" max="30" value="${esc(s.change_days ?? 3)}"><small>Tage lang gelb markieren (0 = aus)</small></div>
     <div class="frow"><label>Einladungscode</label><input type="text" name="invite_code" value="${esc(s.invite_code || '')}"><small>für die Registrierung neuer Kollegen (leer = jeder darf)</small></div>
     <div class="actions"><button class="primary" type="submit">Speichern</button></div></form></div>
@@ -881,7 +884,7 @@ document.addEventListener('change', async e => {
 document.addEventListener('submit', async e => {
   if (e.target.id !== 'fSettings') return;
   e.preventDefault(); const d = formData(e.target);
-  const rows = ['title', 'early_time', 'late_time', 'warn_time', 'days_per_week', 'change_days', 'invite_code'].map(k => ({ key: k, value: d[k] ?? '' }));
+  const rows = ['title', 'early_time', 'late_time', 'warn_time', 'days_per_week', 'change_days', 'invite_code', 'hours_visibility'].map(k => ({ key: k, value: d[k] ?? '' }));
   const { error } = await sb.from('settings').upsert(rows, { onConflict: 'key' });
   if (error) return toast('Speichern fehlgeschlagen: ' + errMsg(error), 5000);
   toast('Einstellungen gespeichert'); loadAll();

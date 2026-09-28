@@ -292,6 +292,7 @@ form.f .frow>span{font-size:15px}
    ============================================================ */
 const SUPABASE_URL = 'https://uphpwnqharjufbwcazyx.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_iub9LBRNcmyj_MfScPKN6Q_2IsNHJmM';
+const VAPID_PUBLIC_KEY = 'BB1xTAwrCRQqrJPMpFwcoV3QX2WkWLHeshVsJEMFWPa-Ck2ik7iHoivX1PaqPDCobAcQ8Lic5cW4hUGITW-6tQA'; // öffentlicher Schlüssel für Push (der private liegt nur auf dem Server)
 
 /* ============================================================
    Hilfsfunktionen
@@ -333,7 +334,7 @@ let selDay = Math.min((new Date().getDay() + 6) % 7, 4);
 let view = 'plan';
 let lastSeen = null;
 let onlyWorking = false;
-const S = { groups: [], employees: [], shifts: [], absences: [], absPublic: [], roles: [], settings: {}, profiles: [], users: null, usersErr: '', absList: [], hoursRange: null, hoursShifts: [], hoursAbs: [] };
+const S = { groups: [], employees: [], shifts: [], absences: [], absPublic: [], roles: [], settings: {}, profiles: [], users: null, usersErr: '', pushByUser: {}, absList: [], hoursRange: null, hoursShifts: [], hoursAbs: [] };
 
 try { lastSeen = +localStorage.getItem('mr_lastSeen') || null; onlyWorking = localStorage.getItem('mr_onlyWorking') === '1'; } catch (e) { }
 
@@ -347,9 +348,21 @@ async function init() {
     if (ev === 'SIGNED_OUT') { session = null; profile = null; showLogin(); return; }
     if (s && (!session || s.user.id !== session.user.id)) { session = s; afterLogin(); }
   });
+  gotoFromUrl(location.href, true);
   const { data } = await sb.auth.getSession();
   if (data && data.session) { session = data.session; afterLogin(); } else showLogin();
-  if ('serviceWorker' in navigator) { try { navigator.serviceWorker.register('sw.js'); } catch (e) { } }
+  if ('serviceWorker' in navigator) {
+    try { navigator.serviceWorker.register('sw.js'); } catch (e) { }
+    try { navigator.serviceWorker.addEventListener('message', ev => { if (ev.data && ev.data.type === 'goto') { gotoFromUrl(ev.data.url, false); if (session) { view = 'plan'; render(); loadAll(); } } }); } catch (e) { }
+  }
+}
+/* ?week=JJJJ-MM-TT (aus einer Push-Meldung): zu dieser Woche springen */
+function gotoFromUrl(href, clean) {
+  try {
+    const u = new URL(href, location.href); const w = u.searchParams.get('week');
+    if (w && /^\d{4}-\d{2}-\d{2}$/.test(w)) { const d = parseISO(w); if (!isNaN(d)) { weekStart = mondayOf(d); selDay = Math.min(Math.max(0, (d.getDay() + 6) % 7), 4); } }
+    if (clean && w) history.replaceState(null, '', u.pathname);
+  } catch (e) { }
 }
 
 function showLogin() {
@@ -366,6 +379,7 @@ async function afterLogin() {
   try { localStorage.setItem('mr_lastSeen', String(Date.now())); } catch (e) { }
   await loadAll();
   setupRealtime();
+  PUSH.sync();
 }
 
 $('#toRegister').addEventListener('click', e => { e.preventDefault(); $('#fLogin').classList.add('hidden'); $('#fRegister').classList.remove('hidden'); $('#toRegister').classList.add('hidden'); $('#toLogin').classList.remove('hidden'); });
@@ -442,11 +456,13 @@ async function loadProfiles() {
   const r = await adminFn({ action: 'list' });
   S.users = r.ok ? Object.fromEntries((r.users || []).map(u => [u.id, u])) : null; S.usersErr = r.ok ? '' : r.error;
   const { data } = await sb.from('profiles').select('*').order('display_name'); S.profiles = data || [];
+  const ps = await sb.from('push_subscriptions').select('user_id'); S.pushByUser = {}; for (const row of (ps.data || [])) S.pushByUser[row.user_id] = (S.pushByUser[row.user_id] || 0) + 1;
 }
-/* Ruft die Admin-Funktion auf dem Server auf (Logins verwalten). Gibt immer { ok, ... } zurück. */
-async function adminFn(body) {
+/* Ruft eine Server-Funktion auf (Logins verwalten, Benachrichtigen). Gibt immer { ok, ... } zurück. */
+const adminFn = body => fnCall('admin-users', body);
+async function fnCall(name, body) {
   try {
-    const { data, error } = await sb.functions.invoke('admin-users', { body });
+    const { data, error } = await sb.functions.invoke(name, { body });
     if (error) {
       let msg = errMsg(error);
       try { const ctx = error.context; if (ctx && typeof ctx.json === 'function') { const j = await ctx.json(); if (j && j.error) msg = j.error; } } catch (x) { }
@@ -459,6 +475,48 @@ async function adminFn(body) {
 }
 function genPw() { const a = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'; const arr = new Uint32Array(10); crypto.getRandomValues(arr); return Array.from(arr, n => a[n % a.length]).join(''); }
 function userEmail(uid) { const u = S.users && S.users[uid]; const p = S.profiles.find(x => x.user_id === uid); return (u && u.email) || (uid === session.user.id ? session.user.email : '') || (p && p.display_name) || uid; }
+
+/* ---------- Push-Benachrichtigungen (Gerät anmelden / abmelden) ---------- */
+const pushApi = window.__pushApi || {
+  supported() { return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window; },
+  permission() { return Notification.permission; },
+  requestPermission() { return Notification.requestPermission(); },
+  async getSubscription() { const r = await navigator.serviceWorker.ready; return r.pushManager.getSubscription(); },
+  async subscribe(key) { const r = await navigator.serviceWorker.ready; const raw = atob(key.replace(/-/g, '+').replace(/_/g, '/')); const k = Uint8Array.from(raw, c => c.charCodeAt(0)); return r.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: k }); },
+  async unsubscribe() { const s = await this.getSubscription(); if (s) await s.unsubscribe(); return !!s; },
+};
+const PUSH = {
+  iosNeedsInstall() { const ios = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1); const standalone = window.navigator.standalone === true || (window.matchMedia && matchMedia('(display-mode: standalone)').matches); return ios && !standalone; },
+  row(sub) { const j = sub.toJSON ? sub.toJSON() : sub; return { user_id: session.user.id, endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth, user_agent: navigator.userAgent.slice(0, 200) }; },
+  async state() {
+    if (!pushApi.supported()) return { code: 'unsupported', text: 'Auf diesem Gerät bzw. in diesem Browser nicht verfügbar.' };
+    if (this.iosNeedsInstall()) return { code: 'install', text: 'Auf dem iPhone zuerst die App zum Home-Bildschirm hinzufügen (Anleitung unten) und von dort öffnen – dann hier einschalten.' };
+    if (pushApi.permission() === 'denied') return { code: 'denied', text: 'Für diese App sind Benachrichtigungen im Handy/Browser blockiert. Dort unter Einstellungen → Benachrichtigungen erlauben, dann hier einschalten.' };
+    const sub = await pushApi.getSubscription().catch(() => null);
+    return sub ? { code: 'on', text: 'Eingeschaltet auf diesem Gerät.' } : { code: 'off', text: 'Ausgeschaltet. Du erfährst nichts von Planänderungen, bis du sie einschaltest.' };
+  },
+  async enable() {
+    const perm = await pushApi.requestPermission();
+    if (perm !== 'granted') return { ok: false, error: 'Benachrichtigungen wurden nicht erlaubt.' };
+    try {
+      await pushApi.unsubscribe(); // frisch anmelden, damit dieses Gerät sicher zu diesem Login gehört
+      const sub = await pushApi.subscribe(VAPID_PUBLIC_KEY);
+      const { error } = await sb.from('push_subscriptions').upsert(this.row(sub), { onConflict: 'endpoint' });
+      if (error) return { ok: false, error: errMsg(error) };
+      return { ok: true };
+    } catch (e) { return { ok: false, error: errMsg(e) }; }
+  },
+  async disable() {
+    try {
+      const sub = await pushApi.getSubscription();
+      if (sub) { const ep = (sub.toJSON ? sub.toJSON() : sub).endpoint; await sb.from('push_subscriptions').delete().eq('endpoint', ep); await pushApi.unsubscribe(); }
+      return { ok: true };
+    } catch (e) { return { ok: false, error: errMsg(e) }; }
+  },
+  async sync() { // beim Start: bestehendes Abo dieses Geräts dem aktuellen Login zuordnen (still)
+    try { if (!pushApi.supported() || pushApi.permission() !== 'granted') return; const sub = await pushApi.getSubscription(); if (sub) await sb.from('push_subscriptions').upsert(this.row(sub), { onConflict: 'endpoint' }); } catch (e) { }
+  },
+};
 function monthRange(offset) { const d = new Date(); const from = new Date(d.getFullYear(), d.getMonth() + offset, 1); const to = new Date(d.getFullYear(), d.getMonth() + offset + 1, 0); return { from: iso(from), to: iso(to) }; }
 async function loadHours() {
   const r = S.hoursRange || (S.hoursRange = monthRange(0));
@@ -569,7 +627,7 @@ function renderPlan(D) {
   h += renderMyWeek(D);
   h += `<div class="daylist">${renderDayList(D[selDay], secs)}</div>`;
   h += `<div class="gridwrap"><table class="grid">${renderGrid(D, secs)}</table></div>`;
-  h += `<div class="planactions admin-only"><button class="ghost" data-action="copyweek">Woche kopieren…</button><button class="ghost" data-action="print">Drucken</button><span style="flex:1"></span><button class="danger" data-action="clearweek">Woche leeren…</button></div>`;
+  h += `<div class="planactions admin-only"><button class="ghost" data-action="copyweek">Woche kopieren…</button><button class="ghost" data-action="notify">Benachrichtigen…</button><button class="ghost" data-action="print">Drucken</button><span style="flex:1"></span><button class="danger" data-action="clearweek">Woche leeren…</button></div>`;
   if (!S.employees.length) h += `<div class="card">Noch keine Mitarbeiter angelegt.${isAdmin ? ' Gehe zu „Mitarbeiter“, um zu starten.' : ''}</div>`;
   return h;
 }
@@ -693,13 +751,14 @@ function renderLogins() {
   let h = `<div class="card"><h2>Logins <span class="cnt">(${S.profiles.length})</span></h2>
   <div class="toolbar"><button class="primary" data-action="newlogin" ${ok ? '' : 'disabled'}>+ Neuer Login</button></div>
   <div class="noteinfo"><b>So bekommen Kollegen Zugang:</b><ol><li>Hier auf „+ Neuer Login“: E-Mail-Adresse der Person, ein Startpasswort und den Namen im Plan eingeben.</li><li>Der Person E-Mail und Startpasswort geben. Sie meldet sich an unter <code class="url">${esc(url)}</code> und ändert das Passwort im Menü ☰.</li><li>Passwort vergessen? Bei der Person auf „Passwort“ klicken und ein neues vergeben.</li><li>Jemand arbeitet nicht mehr hier? „Löschen“ – der Name im Plan und alle Dienste bleiben erhalten.</li></ol>
+  Spalte „Push“: ob die Person Benachrichtigungen eingeschaltet hat (jeder selbst im Menü ☰). Benachrichtigen: im Plan auf „Benachrichtigen…“.
   Kollegen können sich auch selbst registrieren, mit dem Einladungscode <b>${esc(S.settings.invite_code || '(kein Code gesetzt – jeder kann sich registrieren)')}</b> (siehe Einstellungen). Danach hier den Login dem Namen im Plan zuordnen.</div>`;
   if (!ok) h += `<div class="err">Die Login-Verwaltung ist gerade nicht erreichbar${S.usersErr ? ': ' + esc(S.usersErr) : ''}. Zuordnen und Admin-Recht funktionieren trotzdem; für Anlegen, Passwort, E-Mail und Löschen bitte später erneut versuchen (↻).</div>`;
-  h += `<table class="list logins"><thead><tr><th>E-Mail (Login)</th><th>Name</th><th>Name im Plan</th><th>Admin</th><th>Letzte Anmeldung</th><th></th></tr></thead><tbody>`;
+  h += `<table class="list logins"><thead><tr><th>E-Mail (Login)</th><th>Name</th><th>Name im Plan</th><th>Admin</th><th>Letzte Anmeldung</th><th>Push</th><th></th></tr></thead><tbody>`;
   for (const p of S.profiles) {
     const me = p.user_id === session.user.id; const u = S.users && S.users[p.user_id];
     const email = (u && u.email) || (me ? session.user.email : '');
-    h += `<tr><td><b>${esc(email || p.display_name || p.user_id)}</b>${me ? ' <small>(du)</small>' : ''}</td><td>${esc(p.display_name || '')}</td><td><select data-action="linkprofile" data-uid="${p.user_id}"><option value="">– nicht zugeordnet –</option>${S.employees.map(e => `<option value="${e.id}" ${p.employee_id === e.id ? 'selected' : ''}>${esc(e.name)}</option>`).join('')}</select></td><td><input type="checkbox" data-action="setadmin" data-uid="${p.user_id}" ${p.is_admin ? 'checked' : ''} ${me ? 'disabled title="Du kannst dir selbst das Admin-Recht nicht entziehen"' : ''}></td><td>${u ? fmtTs(u.last_sign_in_at) : (ok ? '<span class="muted">kein Login</span>' : '–')}</td><td class="acts">${ok ? `<button class="ghost sm" data-action="setpw" data-uid="${p.user_id}">Passwort</button><button class="ghost sm" data-action="setemail" data-uid="${p.user_id}">E-Mail</button><button class="danger sm" data-action="deluser" data-uid="${p.user_id}" ${me ? 'disabled title="Den eigenen Login kann man nicht löschen"' : ''}>Löschen</button>` : ''}</td></tr>`;
+    h += `<tr><td><b>${esc(email || p.display_name || p.user_id)}</b>${me ? ' <small>(du)</small>' : ''}</td><td>${esc(p.display_name || '')}</td><td><select data-action="linkprofile" data-uid="${p.user_id}"><option value="">– nicht zugeordnet –</option>${S.employees.map(e => `<option value="${e.id}" ${p.employee_id === e.id ? 'selected' : ''}>${esc(e.name)}</option>`).join('')}</select></td><td><input type="checkbox" data-action="setadmin" data-uid="${p.user_id}" ${p.is_admin ? 'checked' : ''} ${me ? 'disabled title="Du kannst dir selbst das Admin-Recht nicht entziehen"' : ''}></td><td>${u ? fmtTs(u.last_sign_in_at) : (ok ? '<span class="muted">kein Login</span>' : '–')}</td><td>${(S.pushByUser || {})[p.user_id] ? 'ja' + ((S.pushByUser[p.user_id] > 1) ? ` (${S.pushByUser[p.user_id]} Geräte)` : '') : '<span class="muted">nein</span>'}</td><td class="acts">${ok ? `<button class="ghost sm" data-action="setpw" data-uid="${p.user_id}">Passwort</button><button class="ghost sm" data-action="setemail" data-uid="${p.user_id}">E-Mail</button><button class="danger sm" data-action="deluser" data-uid="${p.user_id}" ${me ? 'disabled title="Den eigenen Login kann man nicht löschen"' : ''}>Löschen</button>` : ''}</td></tr>`;
   }
   return h + '</tbody></table></div>';
 }
@@ -1039,11 +1098,48 @@ async function copyWeek(srcStart, replace, withRoles) {
   if (withRoles) { const rr = (r2.data || []).filter(r => r.employee_id).map(r => ({ day: iso(addDays(parseISO(r.day), offset)), role: r.role, employee_id: r.employee_id })); if (rr.length) { const u = await sb.from('day_roles').upsert(rr, { onConflict: 'day,role' }); if (u.error) throw u.error; } }
 }
 
+/* ---------- Mitarbeiter benachrichtigen (Admin) ---------- */
+async function openNotify() {
+  const ws = iso(weekStart); const kw = isoWeek(weekStart); const range = `${fmtD(weekStart)} – ${fmtDY(addDays(weekStart, days().length - 1))}`;
+  openModal(`<h3>Mitarbeiter benachrichtigen<small>KW ${kw} · ${range}</small></h3><p class="help" id="notifyInfo">Prüfe, wer erreichbar ist…</p>`);
+  const pv = await fnCall('notify', { action: 'preview', week_start: ws, mode: 'changed' });
+  if (!pv.ok) { $('#notifyInfo').innerHTML = `<div class="err">Benachrichtigen ist gerade nicht möglich: ${esc(pv.error)}</div><div class="actions"><button type="button" class="ghost" data-action="closemodal">Schließen</button></div>`; return; }
+  const fmtTs = ts => { const d = new Date(ts); return `${fmtDY(d)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
+  const last = pv.last; const nChanged = pv.recipients_changed || 0;
+  const defText = last ? `Der Plan für KW ${kw} (${range}) wurde geändert. Bitte anschauen.` : `Der Plan für KW ${kw} (${range}) ist da.`;
+  const changedList = (pv.changed_employees || []).join(', ');
+  $('#mbox').innerHTML = `<h3>Mitarbeiter benachrichtigen<small>KW ${kw} · ${range}</small></h3><form class="f" id="fNotify">
+    <div class="noteinfo">Push eingeschaltet: <b>${pv.subscribed_users}</b> Login${pv.subscribed_users === 1 ? '' : 's'} (im Menü ☰ kann jeder Kollege es selbst einschalten). Letzte Benachrichtigung für diese Woche: <b>${last ? esc(fmtTs(last.sent_at)) + ' an ' + last.recipients + ' Person' + (last.recipients === 1 ? '' : 'en') : 'noch keine'}</b>.</div>
+    <label class="check"><input type="radio" name="mode" value="changed" ${last ? 'checked' : 'disabled'}> Nur Betroffene: Änderungen seit der letzten Benachrichtigung${last ? ` – ${nChanged} Person${nChanged === 1 ? '' : 'en'} mit Push${changedList ? ` (geändert bei: ${esc(changedList)})` : ' (keine Änderungen gefunden)'}` : ' (erst nach der ersten Benachrichtigung möglich)'}</label>
+    <label class="check"><input type="radio" name="mode" value="all" ${last ? '' : 'checked'}> Alle mit Push (${pv.subscribed_users})</label>
+    <div class="frow"><label>Text</label><input type="text" name="text" required maxlength="200" value="${esc(defText)}"></div>
+    <p class="help">Die Meldung erscheint auf dem Handy wie eine Nachricht; ein Tipp darauf öffnet die App bei KW ${kw}. Wer Push nicht eingeschaltet hat, bekommt nichts.</p>
+    <div class="actions"><button class="primary" type="submit" ${pv.subscribed_users ? '' : 'disabled'}>Jetzt senden</button><button type="button" class="ghost" data-action="closemodal">Abbrechen</button></div></form>`;
+  $('#fNotify').addEventListener('submit', async ev => {
+    ev.preventDefault(); const d = formData(ev.target); const btn = $('button[type=submit]', ev.target); btn.disabled = true; btn.textContent = 'Sende…';
+    const r = await fnCall('notify', { action: 'send', week_start: ws, mode: d.mode || 'all', text: d.text });
+    if (!r.ok) { btn.disabled = false; btn.textContent = 'Jetzt senden'; return toast('Senden fehlgeschlagen: ' + r.error, 6000); }
+    closeModal();
+    if (!r.users) return toast('Niemand zu benachrichtigen (keine Betroffenen mit Push).', 5000);
+    toast(`Gesendet an ${r.users} Person${r.users === 1 ? '' : 'en'}, ${r.delivered} zugestellt${r.failed ? `, ${r.failed} fehlgeschlagen` : ''}${r.removed ? ` (${r.removed} abgelaufene Geräte entfernt)` : ''}.`, 7000);
+  });
+}
+
 function openMenu() {
   const e = profile.employee_id ? empById(profile.employee_id) : null;
   openModal(`<h3>Menü<small>Angemeldet als ${esc(profile.display_name || session.user.email)}${e ? ` · ${esc(e.name)}` : ''}${isAdmin ? ' · Admin' : ''}</small></h3>
+    <div class="noteinfo" id="pushBox"><b>Benachrichtigung bei Planänderungen</b><p id="pushState" class="help" style="margin:6px 0">Prüfe…</p><div class="actions" style="margin-top:6px"><button type="button" class="primary sm hidden" data-action="pushon">Einschalten</button><button type="button" class="ghost sm hidden" data-action="pushoff">Ausschalten</button></div></div>
     <div class="help"><p><b>Auf dem Handy als App installieren:</b></p><ol><li><b>iPhone:</b> Diese Seite in Safari öffnen → Teilen-Symbol (Quadrat mit Pfeil) → „Zum Home-Bildschirm“.</li><li><b>Android:</b> In Chrome öffnen → Menü ⋮ → „App installieren“ oder „Zum Startbildschirm hinzufügen“.</li></ol></div>
     <form class="f"><div class="actions"><button type="button" class="ghost" data-action="changepw">Passwort ändern</button>${isAdmin ? '<button type="button" class="ghost" data-action="changeemail">E-Mail ändern</button>' : ''}<button type="button" class="ghost" data-action="reload">Neu laden</button><span class="spacer"></span><button type="button" class="danger" data-action="logout">Abmelden</button></div></form>`);
+  refreshPushUi();
+}
+async function refreshPushUi() {
+  const box = $('#pushBox'); if (!box) return;
+  const st = await PUSH.state(); const p = $('#pushState'); if (!p) return;
+  p.textContent = st.text;
+  $('[data-action=pushon]', box).classList.toggle('hidden', st.code !== 'off');
+  $('[data-action=pushoff]', box).classList.toggle('hidden', st.code !== 'on');
+  box.dataset.state = st.code;
 }
 function openChangePw() {
   openModal(`<h3>Passwort ändern</h3><form class="f" id="fPw"><div class="frow"><label>Neues Passwort</label><input type="password" name="pw" minlength="6" required autocomplete="new-password"></div><div class="frow"><label>Wiederholen</label><input type="password" name="pw2" minlength="6" required autocomplete="new-password"></div>
@@ -1087,6 +1183,7 @@ document.addEventListener('click', async e => {
   else if (a === 'editgroup') openGroupEditor(+el.dataset.id);
   else if (a === 'delgroup') { if (confirm('Gruppe löschen? Die Mitarbeiter bleiben erhalten (ohne Gruppe).')) { const { error } = await sb.from('groups').delete().eq('id', +el.dataset.id); if (error) return toast('Löschen fehlgeschlagen: ' + errMsg(error), 5000); closeModal(); toast('Gelöscht'); loadAll(); } }
   else if (a === 'copyweek') openCopyWeek();
+  else if (a === 'notify') openNotify();
   else if (a === 'clearweek') { if (confirm(`Alle Dienste sowie Accueil/Schluss der KW ${isoWeek(weekStart)} (${fmtD(weekStart)} – ${fmtDY(addDays(weekStart, 6))}) löschen? Abwesenheiten bleiben erhalten. Das kann nicht rückgängig gemacht werden.`)) { const f = iso(weekStart), t = iso(addDays(weekStart, 6)); const d1 = await sb.from('shifts').delete().gte('day', f).lte('day', t); const d2 = await sb.from('day_roles').delete().gte('day', f).lte('day', t); if (d1.error || d2.error) return toast('Löschen fehlgeschlagen: ' + errMsg(d1.error || d2.error), 5000); toast('Woche geleert'); loadAll(); } }
   else if (a === 'hoursrange') { const k = el.dataset.r; if (k === 'week') S.hoursRange = { from: iso(weekStart), to: iso(addDays(weekStart, days().length - 1)) }; else if (k === 'month') S.hoursRange = monthRange(0); else if (k === 'lastmonth') S.hoursRange = monthRange(-1); else if (k === 'nextmonth') S.hoursRange = monthRange(1); loadAll(); }
   else if (a === 'hourscsv') hoursCsv();
@@ -1094,6 +1191,8 @@ document.addEventListener('click', async e => {
   else if (a === 'closemodal') closeModal();
   else if (a === 'changepw') openChangePw();
   else if (a === 'changeemail') openSetEmail(session.user.id);
+  else if (a === 'pushon') { el.disabled = true; const r = await PUSH.enable(); el.disabled = false; toast(r.ok ? 'Benachrichtigungen eingeschaltet' : 'Nicht eingeschaltet: ' + r.error, 5000); refreshPushUi(); }
+  else if (a === 'pushoff') { el.disabled = true; const r = await PUSH.disable(); el.disabled = false; toast(r.ok ? 'Benachrichtigungen ausgeschaltet' : 'Fehlgeschlagen: ' + r.error, 5000); refreshPushUi(); }
   else if (a === 'newlogin') openNewLogin();
   else if (a === 'setpw') openSetPw(el.dataset.uid);
   else if (a === 'setemail') openSetEmail(el.dataset.uid);

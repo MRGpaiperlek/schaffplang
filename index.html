@@ -88,6 +88,12 @@ main{padding:10px 10px 40px;max-width:1500px;margin:0 auto}
 .myday>small{display:block;margin-bottom:3px}
 .myday .cell{justify-content:center;text-align:center;min-height:auto;padding:2px 0;font-size:11.5px;gap:2px 4px}
 .myday .cell .t b{font-weight:700}
+.myday .cell.shift{display:flex;flex-direction:column;gap:1px;padding:2px 0}
+.myday .cell .blk{border:0;background:transparent;padding:0;min-height:auto;overflow:visible}
+.myday .cell .blk:empty{display:none}
+.myday .cell .blk .h{display:none}
+.myday .cell .blk .t{font-size:11.5px}
+.myday .cell .blk.nt.has,.myday .cell.chg .blk{background:transparent}
 .myday .badge{font-size:10px;padding:0 5px}
 
 .dayhead{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:6px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:8px 12px;margin-bottom:8px}
@@ -120,6 +126,20 @@ main{padding:10px 10px 40px;max-width:1500px;margin:0 auto}
 .cell.abs-formatioun{background:#ffe0b3;color:#7a4b00}
 .cell.abs-frei{background:#e5e7eb;color:#4b5563}
 .cell.abs-sonstiges,.cell.abs-x{background:#e8dcf2;color:#4a2b6a}
+.cell.abs-c-red{background:#f9b4b4}.cell.abs-c-orange{background:#ffd08a}.cell.abs-c-grey{background:#d9dde3}.cell.abs-c-other{background:#dccbea}
+.cell.abs .abslbl{min-height:16px;display:inline-block}
+.cell.shift{display:grid;grid-template-columns:1.05fr 1.05fr .9fr;gap:2px;padding:2px;align-items:stretch}
+.cell .blk{border:1px solid rgba(0,0,0,.1);border-radius:5px;padding:2px 2px;min-height:30px;background:rgba(255,255,255,.6);display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;overflow:hidden;line-height:1.15}
+.cell .blk .t{font-size:11.5px;white-space:nowrap}
+.cell .blk .h{font-size:10.5px;color:var(--muted);white-space:nowrap}
+.cell .blk.nt.has{background:#fff8c6;border-color:#f0dc82}
+.cell .blk .note{font-size:9.5px;font-weight:700;color:#3d4a5c;text-transform:uppercase;letter-spacing:0;overflow-wrap:anywhere}
+.cell .badges{grid-column:1/-1;display:flex;gap:4px;justify-content:center;flex-wrap:wrap}
+.cell.chg .blk{background:rgba(255,255,255,.35)}
+.cell.chg .blk.nt.has{background:#fff3a3}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:#3d4a5c;margin:8px 2px 0}
+.legend span{display:inline-flex;align-items:center;gap:5px}
+.legend .sw{display:inline-block;width:14px;height:14px;border-radius:3px;border:1px solid rgba(0,0,0,.12)}
 .badge{font-style:normal;font-size:11px;font-weight:700;border-radius:999px;padding:1px 7px;color:#fff;background:var(--blue)}
 .badge.schl{background:var(--navy)}
 
@@ -553,15 +573,18 @@ function absOf(empId, day) {
   const a = S.absences.find(x => x.employee_id === empId && x.from_day <= day && x.to_day >= day);
   if (a) return Object.assign({ known: true }, a);
   const p = S.absPublic.find(x => x.employee_id === empId && x.from_day <= day && x.to_day >= day);
-  if (p) return { employee_id: empId, kind: null, known: false };
+  if (p) return { employee_id: empId, kind: null, known: false, color: p.color || 'other' };
   return null;
 }
 function roleOf(day, role) { const r = S.roles.find(x => x.day === day && x.role === role); return r ? empById(r.employee_id) : null; }
 function hasTimes(s) { return !!(s && ((s.start1 && s.end1) || (s.start2 && s.end2))); }
 function shiftHours(s) { let h = 0; if (s.start1 && s.end1) h += (mins(s.end1) - mins(s.start1)) / 60; if (s.start2 && s.end2) h += (mins(s.end2) - mins(s.start2)) / 60; return Math.max(0, h); }
 function weekHours(emp) { return days().reduce((sum, d) => { const s = shiftOf(emp.id, d.iso); if (!s || absOf(emp.id, d.iso)) return sum; return sum + shiftHours(s); }, 0); }
-function isChanged(s) { const cd = +S.settings.change_days; if (!(cd > 0)) return false; return s && s.updated_at && (Date.now() - new Date(s.updated_at).getTime()) < cd * 86400000; }
-function isNew(s) { return !!(s && lastSeen && s.updated_at && new Date(s.updated_at).getTime() > lastSeen); }
+function changedAt(s) { return s ? (s.changed_at === undefined ? s.updated_at : s.changed_at) : null; } // changed_at = echte inhaltliche Änderung (Admin kann sie „entmarkieren“)
+function isChanged(s) { const cd = +S.settings.change_days; if (!(cd > 0)) return false; const t = changedAt(s); return !!t && (Date.now() - new Date(t).getTime()) < cd * 86400000; }
+function isNew(s) { const t = changedAt(s); return !!(t && lastSeen && new Date(t).getTime() > lastSeen); }
+const fmtHM = h => { const m = Math.round(Math.max(0, h) * 60); return `${Math.floor(m / 60)}:${pad2(m % 60)}`; };
+function blockHours(st, en) { return st && en ? Math.max(0, (mins(en) - mins(st)) / 60) : 0; }
 function countWorking(day) { return S.employees.filter(e => e.active !== false && hasTimes(shiftOf(e.id, day)) && !absOf(e.id, day)).length; }
 function sections() {
   const active = S.employees.filter(e => e.active !== false);
@@ -599,28 +622,30 @@ function render() {
   else if (view === 'hours') c.innerHTML = renderHours();
 }
 
-function cellHtml(emp, d) {
+function cellHtml(emp, d, boxes) {
   const s = shiftOf(emp.id, d.iso); const a = absOf(emp.id, d.iso);
   const cls = ['cell']; let inner = '';
   if (a) {
-    const label = a.known ? (KINDS[a.kind] || 'Abwesend') : 'Abwesend';
-    cls.push('abs', 'abs-' + (a.known ? a.kind : 'x'));
-    inner = `<span class="abslbl">${esc(label)}</span>${a.known && a.note ? `<small>${esc(a.note)}</small>` : ''}`;
-  } else if (s) {
-    const parts = [];
-    const blocks = [[s.start1, s.end1], [s.start2, s.end2]].filter(b => b[0] && b[1]).sort((x, y) => mins(x[0]) - mins(y[0]));
-    for (const [st, en] of blocks) parts.push(`<span class="t"><b class="${timeCls(st, 'start')}">${fmtT(st)}</b>–<b class="${timeCls(en, 'end')}">${fmtT(en)}</b></span>`);
-    if (s.note) parts.push(`<small class="note">${esc(s.note)}</small>`);
-    inner = parts.join('');
-    if (isChanged(s)) cls.push('chg');
-    if (isNew(s)) cls.push('new');
+    if (a.known) { cls.push('abs', 'abs-' + a.kind); inner = `<span class="abslbl">${esc(KINDS[a.kind] || 'Abwesend')}</span>${a.note ? `<small>${esc(a.note)}</small>` : ''}`; }
+    else { cls.push('abs', 'abs-c-' + (a.color || 'other')); inner = '<span class="abslbl" title="Abwesend">&nbsp;</span>'; } // Kollegen sehen nur die Farbe
+  } else if ((s && (hasTimes(s) || s.note)) || boxes) {
+    // Drei Felder wie in der Excel-Vorlage: Block 1, Block 2 (je mit Stunden), Notiz (mit Tagessumme)
+    cls.push('shift');
+    const blk = (st, en) => (st && en) ? `<div class="blk"><span class="t"><b class="${timeCls(st, 'start')}">${fmtT(st)}</b>–<b class="${timeCls(en, 'end')}">${fmtT(en)}</b></span><small class="h">${fmtHM(blockHours(st, en))}</small></div>` : '<div class="blk"></div>';
+    const tot = s ? shiftHours(s) : 0;
+    inner = blk(s && s.start1, s && s.end1) + blk(s && s.start2, s && s.end2) + `<div class="blk nt ${s && s.note ? 'has' : ''}">${s && s.note ? `<span class="note">${esc(s.note)}</span>` : ''}${tot ? `<small class="h">= ${fmtHM(tot)}</small>` : ''}</div>`;
+    if (s && isChanged(s)) cls.push('chg');
+    if (s && isNew(s)) cls.push('new');
   }
   const badges = [];
   const acc = roleOf(d.iso, 'accueil'), schl = roleOf(d.iso, 'schluss');
   if (acc && acc.id === emp.id) badges.push('<i class="badge acc">Accueil</i>');
   if (schl && schl.id === emp.id) badges.push('<i class="badge schl">Schluss</i>');
   const act = isAdmin ? `data-action="edit" data-emp="${emp.id}" data-day="${d.iso}"` : '';
-  return `<div class="${cls.join(' ')}" ${act}>${inner}${badges.join('')}</div>`;
+  return `<div class="${cls.join(' ')}" ${act}>${inner}${badges.length ? `<div class="badges">${badges.join('')}</div>` : ''}</div>`;
+}
+function renderLegend() {
+  return `<div class="legend"><span><i class="sw" style="background:#fbd5d5"></i>Congé / Krank</span><span><i class="sw" style="background:#ffe0b3"></i>Formatioun</span><span><i class="sw" style="background:#e5e7eb"></i>Fräi</span><span><i class="sw" style="background:#e8dcf2"></i>Sonstiges</span><span><i class="sw" style="background:var(--yellow);border-color:#e0b800"></i>geändert (letzte ${+S.settings.change_days || 0} Tage)</span><span><i class="sw" style="background:#fff8c6;border-color:#f0dc82"></i>Notiz</span><span><b style="color:var(--red)">rot</b> = ${fmtT(S.settings.early_time || '07:00')} / ${fmtT(S.settings.late_time || '19:00')}</span>${S.settings.warn_time ? `<span><b style="color:var(--orange)">orange</b> = ${fmtT(S.settings.warn_time)}</span>` : ''}</div>`;
 }
 
 function renderPlan(D) {
@@ -632,7 +657,8 @@ function renderPlan(D) {
   h += renderMyWeek(D);
   h += `<div class="daylist">${renderDayList(D[selDay], secs)}</div>`;
   h += `<div class="gridwrap"><table class="grid">${renderGrid(D, secs)}</table></div>`;
-  h += `<div class="planactions admin-only"><button class="ghost" data-action="copyweek">Woche kopieren…</button><button class="ghost" data-action="notify">Benachrichtigen…</button><button class="ghost" data-action="print">Drucken</button><span style="flex:1"></span><button class="danger" data-action="clearweek">Woche leeren…</button></div>`;
+  h += renderLegend();
+  h += `<div class="planactions admin-only"><button class="ghost" data-action="copyweek">Woche kopieren…</button><button class="ghost" data-action="notify">Benachrichtigen…</button><button class="ghost" data-action="print">Drucken</button><button class="ghost" data-action="unmarkweek">Markierungen dieser Woche entfernen…</button><span style="flex:1"></span><button class="danger" data-action="clearweek">Woche leeren…</button></div>`;
   if (!S.employees.length) h += `<div class="card">Noch keine Mitarbeiter angelegt.${isAdmin ? ' Gehe zu „Mitarbeiter“, um zu starten.' : ''}</div>`;
   return h;
 }
@@ -675,7 +701,7 @@ function renderGrid(D, secs) {
     for (const e of emps) {
       const wh = weekHours(e); const target = +e.weekly_hours || 0;
       const hcls = target && Math.abs(wh - target) > 0.01 ? (wh > target ? 'over' : 'under') : '';
-      h += `<tr class="emp ${profile.employee_id === e.id ? 'me' : ''}" style="--gc:${esc(e.color || g.color)}"><td class="name"><span class="nm" style="${e.color ? `background:${esc(e.color)}` : ''}">${esc(e.name)}</span></td>${D.map(d => `<td class="${d.iso === ti ? 'today' : ''}">${cellHtml(e, d)}</td>`).join('')}${hoursColumn() ? `<td class="hrs ${hoursVisible(e) ? hcls : ''}" title="${hoursVisible(e) ? `Soll: ${target} h` : ''}">${hoursVisible(e) ? fmtH(wh) + (target ? `<small>/${fmtH(target)}</small>` : '') : ''}</td>` : ''}</tr>`;
+      h += `<tr class="emp ${profile.employee_id === e.id ? 'me' : ''}" style="--gc:${esc(e.color || g.color)}"><td class="name"><span class="nm" style="${e.color ? `background:${esc(e.color)}` : ''}">${esc(e.name)}</span></td>${D.map(d => `<td class="${d.iso === ti ? 'today' : ''}">${cellHtml(e, d, true)}</td>`).join('')}${hoursColumn() ? `<td class="hrs ${hoursVisible(e) ? hcls : ''}" title="${hoursVisible(e) ? `Soll: ${target} h` : ''}">${hoursVisible(e) ? fmtH(wh) + (target ? `<small>/${fmtH(target)}</small>` : '') : ''}</td>` : ''}</tr>`;
     }
   }
   for (const role of ['accueil', 'schluss']) {
@@ -883,14 +909,15 @@ async function loadLogo() { // Logo als Daten-URL für das PDF (einmal laden, da
 }
 function hexRgb(hex) { const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || '').trim()); if (!m) return [229, 231, 235]; const n = parseInt(m[1], 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; }
 const PDF_COL = { red: [208, 2, 27], orange: [233, 113, 50], text: [27, 36, 48], note: [61, 74, 92], acc: [21, 96, 130], schl: [14, 40, 65] };
-const ABS_COL = { urlaub: [[251, 213, 213], [138, 28, 28]], krank: [[251, 213, 213], [138, 28, 28]], formatioun: [[255, 224, 179], [122, 75, 0]], frei: [[229, 231, 235], [75, 85, 99]], sonstiges: [[232, 220, 242], [74, 43, 106]], x: [[232, 220, 242], [74, 43, 106]] };
+const ABS_COL = { urlaub: [[251, 213, 213], [138, 28, 28]], krank: [[251, 213, 213], [138, 28, 28]], formatioun: [[255, 224, 179], [122, 75, 0]], frei: [[229, 231, 235], [75, 85, 99]], sonstiges: [[232, 220, 242], [74, 43, 106]], red: [[249, 180, 180], [138, 28, 28]], orange: [[255, 208, 138], [122, 75, 0]], grey: [[217, 221, 227], [75, 85, 99]], other: [[220, 203, 234], [74, 43, 106]] };
 function pdfCellInfo(emp, d) {
   const s = shiftOf(emp.id, d.iso); const a = absOf(emp.id, d.iso); const lines = [];
-  if (a) { const k = a.known ? a.kind : 'x'; const label = a.known ? (KINDS[a.kind] || 'Abwesend') : 'Abwesend'; const col = ABS_COL[k] || ABS_COL.x; return { abs: true, absColor: col[0], absText: col[1], text: label + (a.known && a.note ? '\n' + a.note : ''), lines }; }
+  if (a) { const col = a.known ? (ABS_COL[a.kind] || ABS_COL.other) : (ABS_COL[a.color] || ABS_COL.other); const label = a.known ? (KINDS[a.kind] || 'Abwesend') + (a.note ? '\n' + a.note : '') : ''; return { abs: true, absColor: col[0], absText: col[1], text: label, lines }; }
   if (s) {
-    const blocks = [[s.start1, s.end1], [s.start2, s.end2]].filter(b => b[0] && b[1]).sort((x, y) => mins(x[0]) - mins(y[0]));
-    for (const [st, en] of blocks) { const cs = timeCls(st, 'start'), ce = timeCls(en, 'end'); lines.push({ segs: [{ t: fmtT(st), color: cs ? PDF_COL.red : null, bold: true }, { t: '–' }, { t: fmtT(en), color: ce === 'warn' ? PDF_COL.orange : ce ? PDF_COL.red : null, bold: true }] }); }
+    const blocks = [[s.start1, s.end1], [s.start2, s.end2]].filter(b => b[0] && b[1]); // Reihenfolge wie eingetragen (Block 1, Block 2)
+    for (const [st, en] of blocks) { const cs = timeCls(st, 'start'), ce = timeCls(en, 'end'); lines.push({ segs: [{ t: fmtT(st), color: cs ? PDF_COL.red : null, bold: true }, { t: '–' }, { t: fmtT(en), color: ce === 'warn' ? PDF_COL.orange : ce ? PDF_COL.red : null, bold: true }, { t: '  ' + fmtHM(blockHours(st, en)), color: [120, 120, 120], small: true }] }); }
     if (s.note) lines.push({ segs: [{ t: String(s.note).toUpperCase(), color: PDF_COL.note, small: true }] });
+    if (blocks.length > 1) lines.push({ segs: [{ t: '= ' + fmtHM(shiftHours(s)), color: [120, 120, 120], small: true }] });
   }
   const acc = roleOf(d.iso, 'accueil'), schl = roleOf(d.iso, 'schluss');
   if (acc && acc.id === emp.id) lines.push({ segs: [{ t: '» Accueil', color: PDF_COL.acc, bold: true, small: true }] });
@@ -951,7 +978,7 @@ async function exportWeekPdf() {
     didDrawCell: data => { const m = meta[data.row.index]; if (data.section === 'body' && m && m.type === 'emp' && data.column.index >= 1 && data.column.index <= D.length) { const c = m.info[data.column.index - 1]; if (!c.abs && c.lines.length) pdfDrawLines(doc, data.cell, c.lines, fs); } },
   });
   const pages = doc.internal.getNumberOfPages();
-  for (let p = 1; p <= pages; p++) { doc.setPage(p); doc.setFontSize(7); doc.setTextColor(120, 120, 120); doc.text('Rot = Frühdienst (' + fmtT(S.settings.early_time || '07:00') + ') bzw. Schluss (' + fmtT(S.settings.late_time || '19:00') + '), orange = ' + fmtT(S.settings.warn_time || '18:30') + '. Seite ' + p + '/' + pages, 10, doc.internal.pageSize.getHeight() - 5); }
+  for (let p = 1; p <= pages; p++) { doc.setPage(p); doc.setFontSize(7); doc.setTextColor(120, 120, 120); doc.text('Rot = Frühdienst (' + fmtT(S.settings.early_time || '07:00') + ') bzw. Schluss (' + fmtT(S.settings.late_time || '19:00') + ')' + (S.settings.warn_time ? ', orange = ' + fmtT(S.settings.warn_time) : '') + '. Abwesenheit: rot = Congé/Krank, orange = Formatioun, grau = Fräi. Seite ' + p + '/' + pages, 10, doc.internal.pageSize.getHeight() - 5); }
   doc.save(`Schaffplang_KW${isoWeek(weekStart)}_${iso(weekStart)}.pdf`);
 }
 
@@ -993,7 +1020,7 @@ function openShiftEditor(empId, day) {
     </div>
     <div class="frow"><label>Notiz</label><input type="text" name="note" value="${esc(s.note || '')}" placeholder="z. B. PRECOCE, PANDAS, FLAMINGOS"></div>
     <div class="chips"><button type="button" data-fill="note=PRECOCE">PRECOCE</button><button type="button" data-fill="note=PANDAS">PANDAS</button><button type="button" data-fill="note=FLAMINGOS">FLAMINGOS</button><button type="button" data-fill="note=">Notiz löschen</button></div>
-    <div class="actions"><button class="primary" type="submit">Speichern</button><button type="button" class="ghost" data-action="newabs" data-emp="${empId}" data-day="${day}">Abwesenheit…</button><span class="spacer"></span>${s.id ? `<button type="button" class="danger" data-action="clearshift" data-id="${s.id}">Eintrag entfernen</button>` : ''}<button type="button" class="ghost" data-action="closemodal">Abbrechen</button></div>
+    <div class="actions"><button class="primary" type="submit">Speichern</button><button type="button" class="ghost" data-action="newabs" data-emp="${empId}" data-day="${day}">Abwesenheit…</button><span class="spacer"></span>${s.id && isChanged(s) ? `<button type="button" class="ghost" data-action="unmark" data-id="${s.id}" title="Die gelbe Änderungsmarkierung dieser Zelle entfernen">Gelbe Markierung entfernen</button>` : ''}${s.id ? `<button type="button" class="danger" data-action="clearshift" data-id="${s.id}">Eintrag entfernen</button>` : ''}<button type="button" class="ghost" data-action="closemodal">Abbrechen</button></div>
   </form>`);
   $('#fShift').addEventListener('submit', async ev => {
     ev.preventDefault(); const d2 = formData(ev.target);
@@ -1107,7 +1134,7 @@ async function copyWeek(srcStart, replace, withRoles) {
     const d1 = await sb.from('shifts').delete().gte('day', tFrom).lte('day', tTo); if (d1.error) throw d1.error;
     if (withRoles) { const d2 = await sb.from('day_roles').delete().gte('day', tFrom).lte('day', tTo); if (d2.error) throw d2.error; }
   }
-  const rows = (r1.data || []).filter(s => s.start1 || s.start2 || s.note).map(s => ({ employee_id: s.employee_id, day: iso(addDays(parseISO(s.day), offset)), start1: s.start1, end1: s.end1, start2: s.start2, end2: s.end2, note: s.note }));
+  const rows = (r1.data || []).filter(s => s.start1 || s.start2 || s.note).map(s => ({ employee_id: s.employee_id, day: iso(addDays(parseISO(s.day), offset)), start1: s.start1, end1: s.end1, start2: s.start2, end2: s.end2, note: s.note, changed_at: null }));
   if (rows.length) { const u = await sb.from('shifts').upsert(rows, { onConflict: 'employee_id,day' }); if (u.error) throw u.error; }
   if (withRoles) { const rr = (r2.data || []).filter(r => r.employee_id).map(r => ({ day: iso(addDays(parseISO(r.day), offset)), role: r.role, employee_id: r.employee_id })); if (rr.length) { const u = await sb.from('day_roles').upsert(rr, { onConflict: 'day,role' }); if (u.error) throw u.error; } }
 }
@@ -1189,6 +1216,8 @@ document.addEventListener('click', async e => {
   else if (a === 'newabs') { openAbsenceEditor(null, el.dataset.emp ? +el.dataset.emp : null, el.dataset.day || null); }
   else if (a === 'editabs') openAbsenceEditor(+el.dataset.id);
   else if (a === 'delabs') { if (confirm('Diese Abwesenheit löschen?')) { const { error } = await sb.from('absences').delete().eq('id', +el.dataset.id); if (error) return toast('Löschen fehlgeschlagen: ' + errMsg(error), 5000); closeModal(); toast('Gelöscht'); loadAll(); } }
+  else if (a === 'unmark') { const { error } = await sb.from('shifts').update({ changed_at: null }).eq('id', +el.dataset.id); if (error) return toast('Fehlgeschlagen: ' + errMsg(error), 5000); closeModal(); toast('Markierung entfernt'); loadAll(); }
+  else if (a === 'unmarkweek') { if (confirm(`Alle gelben Änderungsmarkierungen der KW ${isoWeek(weekStart)} entfernen? Die Dienste bleiben unverändert.`)) { const f = iso(weekStart), t = iso(addDays(weekStart, 6)); const { error } = await sb.from('shifts').update({ changed_at: null }).gte('day', f).lte('day', t).not('changed_at', 'is', null); if (error) return toast('Fehlgeschlagen: ' + errMsg(error), 5000); toast('Markierungen entfernt'); loadAll(); } }
   else if (a === 'clearshift') { if (confirm('Eintrag für diesen Tag entfernen?')) { const { error } = await sb.from('shifts').update({ start1: null, end1: null, start2: null, end2: null, note: null }).eq('id', +el.dataset.id); if (error) return toast('Fehlgeschlagen: ' + errMsg(error), 5000); closeModal(); toast('Entfernt'); loadAll(); } }
   else if (a === 'newemp') openEmployeeEditor(null);
   else if (a === 'editemp') openEmployeeEditor(+el.dataset.id);

@@ -836,7 +836,7 @@ async function openReqArchive() {
   const { data, error } = await sb.from('requests').select('*').not('closed_at', 'is', null).order('closed_at', { ascending: false }).limit(200);
   if (error) { $('#arcInfo').innerHTML = `<div class="err">${esc(errMsg(error))}</div>`; return; }
   const rows = (data || []).map(r => { const e = empById(r.employee_id); return `<tr><td><b>${esc(e ? e.name : '?')}</b></td><td>${reqWhen(r)}</td><td>${esc(r.text)}</td><td>${r.answer === 'ja' ? '✓ JA' : r.answer === 'nein' ? '✗ NEIN' : '–'}${r.answer_text ? ` „${esc(r.answer_text)}“` : ''}</td><td><small>${fmtTs(r.created_at)}${r.answered_at ? '<br>Antw. ' + fmtTs(r.answered_at) : ''}<br>erl. ${fmtTs(r.closed_at)}</small></td><td><button class="ghost sm" data-action="reqreopen" data-id="${r.id}">Wieder öffnen</button></td></tr>`; }).join('');
-  $('#arcInfo').outerHTML = rows ? `<div style="overflow:auto;max-height:60vh"><table class="list"><thead><tr><th>Wer</th><th>Tag</th><th>Frage</th><th>Antwort</th><th>Zeit</th><th></th></tr></thead><tbody>${rows}</tbody></table></div><div class="actions"><button type="button" class="ghost" data-action="closemodal">Schließen</button></div>` : '<p class="help">Noch keine erledigten Anfragen.</p><div class="actions"><button type="button" class="ghost" data-action="closemodal">Schließen</button></div>';
+  $('#arcInfo').outerHTML = rows ? `<div style="overflow:auto;max-height:60vh"><table class="list"><thead><tr><th>Wer</th><th>Tag</th><th>Frage</th><th>Antwort</th><th>Zeit</th><th></th></tr></thead><tbody>${rows}</tbody></table></div><div class="actions" style="align-items:center"><select id="arcAge"><option value="3">älter als 3 Monate</option><option value="6">älter als 6 Monate</option><option value="12" selected>älter als 1 Jahr</option><option value="0">alle erledigten</option></select><button type="button" class="danger" data-action="reqpurge">Erledigte löschen…</button><span class="spacer"></span><button type="button" class="ghost" data-action="closemodal">Schließen</button></div><p class="help">Gelöscht werden nur erledigte Anfragen (Stichtag: Datum „erledigt“). Offene und noch nicht erledigte Anfragen bleiben immer erhalten. Löschen kann man nicht rückgängig machen.</p>` : '<p class="help">Noch keine erledigten Anfragen.</p><div class="actions"><button type="button" class="ghost" data-action="closemodal">Schließen</button></div>';
 }
 function openDayNoteEditor(day) {
   const d = parseISO(day); const cur = dayNote(day);
@@ -1493,6 +1493,17 @@ document.addEventListener('click', async e => {
   else if (a === 'daynotedel') { const { error } = await sb.from('day_notes').delete().eq('day', el.dataset.day); if (error) return toast('Fehlgeschlagen: ' + errMsg(error), 5000); closeModal(); toast('Bemerkung gelöscht'); loadAll(); }
   else if (a === 'reqdone') { if (confirm('Anfrage als erledigt markieren? Sie verschwindet aus der Liste und bleibt im „Anfragen-Archiv…“ (unten im Plan) einsehbar.')) { const { error } = await sb.from('requests').update({ closed_at: new Date().toISOString(), seen_by_admin_at: new Date().toISOString() }).eq('id', +el.dataset.id); if (error) return toast('Fehlgeschlagen: ' + errMsg(error), 5000); toast('Erledigt'); loadAll(); } }
   else if (a === 'gotoweek') { const d = parseISO(el.dataset.week); weekStart = mondayOf(d); render(); loadAll(); window.scrollTo(0, 0); }
+  else if (a === 'reqpurge') {
+    const m = +$('#arcAge').value; let q = sb.from('requests').select('id').not('closed_at', 'is', null);
+    if (m) { const d = new Date(); d.setMonth(d.getMonth() - m); q = q.lt('closed_at', d.toISOString()); }
+    const { data, error } = await q; if (error) return toast('Fehlgeschlagen: ' + errMsg(error), 5000);
+    const ids = (data || []).map(r => r.id);
+    if (!ids.length) return toast(m ? `Keine erledigten Anfragen älter als ${m === 12 ? '1 Jahr' : m + ' Monate'}.` : 'Keine erledigten Anfragen vorhanden.', 5000);
+    if (!confirm(`${ids.length} erledigte Anfrage${ids.length === 1 ? '' : 'n'} endgültig löschen? Das kann nicht rückgängig gemacht werden. Offene Anfragen bleiben erhalten.`)) return;
+    const d2 = await sb.from('requests').delete().in('id', ids).not('closed_at', 'is', null);
+    if (d2.error) return toast('Löschen fehlgeschlagen: ' + errMsg(d2.error), 5000);
+    toast(`${ids.length} Anfrage${ids.length === 1 ? '' : 'n'} gelöscht`); openReqArchive();
+  }
   else if (a === 'reqarchive') { if (isAdmin) openReqArchive(); }
   else if (a === 'reqreopen') { const { error } = await sb.from('requests').update({ closed_at: null }).eq('id', +el.dataset.id); if (error) return toast('Fehlgeschlagen: ' + errMsg(error), 5000); closeModal(); toast('Anfrage wieder offen'); loadAll(); }
   else if (a === 'reqedit') { S.reqEdit = +el.dataset.id; render(); }

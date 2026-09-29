@@ -228,6 +228,12 @@ details.warn li.info{color:var(--muted)}
 .reqcard .choice label{display:flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:8px;padding:8px 12px;cursor:pointer;font-weight:600}
 .reqcard .choice input:checked+span{text-decoration:underline}
 .reqcard input[type=text]{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:8px;font-size:15px}
+details.notices{background:#fff;border:1px solid var(--line);border-left:6px solid var(--navy);border-radius:var(--radius);padding:8px 12px;margin-bottom:10px;font-size:14px}
+details.notices summary{cursor:pointer;font-weight:700;color:var(--navy)}
+details.notices .nnew{background:var(--orange);color:#fff;border-radius:999px;padding:1px 8px;font-size:12px;margin-left:6px}
+details.notices ul{list-style:none;margin:8px 0 0;padding:0}
+details.notices li{padding:6px 8px;border-top:1px solid var(--line);cursor:pointer;border-radius:6px}
+details.notices li.new{background:#fff7ee;font-weight:600}
 .badge.req{background:#fff3a3;color:#6b5300;border:1px solid #e0b800}
 .badge.req.ja{background:#d5f2df;color:#1a6b30;border-color:#7fcf9a}
 .badge.req.nein{background:#fbd5d5;color:#8a1c1c;border-color:#f1b9b9}
@@ -297,7 +303,7 @@ form.f .frow>span{font-size:15px}
   main{padding:14px 16px 40px}
 }
 @media print{
-  header,.daytabs,.daylist,.planactions,details.warn,.mycard,.pubbar,.reqcard,#toast{display:none!important}
+  header,.daytabs,.daylist,.planactions,details.warn,.mycard,.pubbar,.reqcard,details.notices,#toast{display:none!important}
   body{background:#fff}
   main{padding:0;max-width:none}
   .gridwrap{display:block;max-height:none;overflow:visible;border:0}
@@ -419,7 +425,7 @@ let lastSeen = null;
 let pendingReq = null; // ?req=ID aus einer Push-Meldung: nach dem Laden zu dieser Anfrage scrollen
 let onlyWorking = false;
 let mobWeek = false; // Handy: Wochenansicht statt Tagesliste
-const S = { groups: [], employees: [], shifts: [], absences: [], absPublic: [], roles: [], settings: {}, profiles: [], users: null, usersErr: '', pushByUser: {}, absList: [], hoursRange: null, hoursShifts: [], hoursAbs: [], week: null, pub: null, requests: [], dayNotes: [] };
+const S = { groups: [], employees: [], shifts: [], absences: [], absPublic: [], roles: [], settings: {}, profiles: [], users: null, usersErr: '', pushByUser: {}, absList: [], hoursRange: null, hoursShifts: [], hoursAbs: [], week: null, pub: null, requests: [], dayNotes: [], notices: [] };
 // week = Veröffentlichungs-Eintrag der angezeigten Woche (null = noch nicht veröffentlicht); pub = veröffentlichte Kopie (nur Admin, zum Vergleich mit dem Entwurf)
 
 try { lastSeen = +localStorage.getItem('mr_lastSeen') || null; onlyWorking = localStorage.getItem('mr_onlyWorking') === '1'; mobWeek = localStorage.getItem('mr_mobweek') === '1'; } catch (e) { }
@@ -536,7 +542,9 @@ async function loadAll() {
       sb.from('day_roles_published').select('*').gte('day', from).lte('day', to),
       sb.from('absences_published').select('*').lte('from_day', to).gte('to_day', from),
       sb.from('day_notes_published').select('*').gte('day', from).lte('day', to));
+    const noticesP = sb.from('notifications').select('id,week_start,sent_at,text').order('sent_at', { ascending: false }).limit(5); // letzte 5 Mitteilungen (Mitarbeiter: nur an sie gerichtete)
     const res = await Promise.all(reqs);
+    const nres = await noticesP; S.notices = nres.data || [];
     const bad = res.find(r => r.error);
     if (bad) { toast('Fehler beim Laden: ' + errMsg(bad.error), 5000); console.error(bad.error); }
     S.groups = res[0].data || []; S.employees = res[1].data || []; S.shifts = res[2].data || []; S.roles = res[3].data || [];
@@ -781,6 +789,12 @@ async function publishWeek() {
     <div class="actions"><button type="button" class="primary" data-action="notify">Benachrichtigen…</button><button type="button" class="ghost" data-action="closemodal">Später</button></div>`);
 }
 
+function renderNotices() {
+  if (!S.notices.length) return '';
+  const isNew = n => !!(lastSeen && new Date(n.sent_at).getTime() > lastSeen);
+  const nNew = S.notices.filter(isNew).length;
+  return `<details class="notices" ${nNew ? 'open' : ''}><summary>🔔 Mitteilungen der Leitung${nNew ? `<span class="nnew">${nNew} neu</span>` : ` <small>(letzte ${S.notices.length})</small>`}</summary><ul>${S.notices.map(n => `<li class="${isNew(n) ? 'new' : ''}" data-action="gotoweek" data-week="${n.week_start}" title="Diese Woche anzeigen"><small>${fmtTs(n.sent_at)} · KW ${isoWeek(parseISO(n.week_start))}</small><br>${esc(n.text)}</li>`).join('')}</ul></details>`;
+}
 const reqWhen = r => r.day ? `${DAY_LONG[(parseISO(r.day).getDay() + 6) % 7].slice(0, 2)} ${fmtDS(r.day)}` : 'ohne Datum';
 function renderRequestsAdmin() {
   const list = S.requests.filter(r => !(profile && profile.employee_id && r.employee_id === profile.employee_id)); // eigene Anfragen stehen im Antwort-Kasten
@@ -864,6 +878,7 @@ function renderPlan(D) {
   const secs = sections();
   let h = '';
   h += renderRequestsStaff(); // an mich gerichtete Anfragen (auch wenn ich Admin bin)
+  h += renderNotices();
   if (!isAdmin && !S.week) return h + `<div class="pubnote"><h2>Noch nicht veröffentlicht</h2><p>Der Plan für KW ${isoWeek(weekStart)} (${fmtD(weekStart)} – ${fmtDY(addDays(weekStart, D.length - 1))}) ist noch in Arbeit. Sobald der Admin ihn veröffentlicht, erscheint er hier.</p></div>`;
   if (isAdmin) h += renderPubBar() + renderRequestsAdmin() + renderWarnings(D);
   if (selDay >= D.length) selDay = 0;
@@ -1398,14 +1413,15 @@ async function openNotify() {
     <label class="check"><input type="radio" name="mode" value="changed" ${last ? 'checked' : 'disabled'}> Nur Betroffene: Änderungen seit der letzten Benachrichtigung${last ? ` – ${nChanged} Person${nChanged === 1 ? '' : 'en'} mit Push${changedList ? ` (geändert bei: ${esc(changedList)})` : ' (keine Änderungen gefunden)'}` : ' (erst nach der ersten Benachrichtigung möglich)'}</label>
     <label class="check"><input type="radio" name="mode" value="all" ${last ? '' : 'checked'}> Alle mit Push (${pv.subscribed_users})</label>
     <div class="frow"><label>Text</label><input type="text" name="text" required maxlength="200" value="${esc(defText)}"></div>
-    <p class="help">Die Meldung erscheint auf dem Handy wie eine Nachricht; ein Tipp darauf öffnet die App bei KW ${kw}. Wer Push nicht eingeschaltet hat, bekommt nichts.</p>
-    <div class="actions"><button class="primary" type="submit" ${pv.subscribed_users ? '' : 'disabled'}>Jetzt senden</button><button type="button" class="ghost" data-action="closemodal">Abbrechen</button></div></form>`;
+    <p class="help">Die Meldung erscheint auf dem Handy wie eine Nachricht; ein Tipp darauf öffnet die App bei KW ${kw}. Zusätzlich steht sie in der App oben unter „Mitteilungen der Leitung“ (die letzten 5) – dort sehen sie auch Kollegen ohne Push.</p>
+    <div class="actions"><button class="primary" type="submit">Jetzt senden</button><button type="button" class="ghost" data-action="closemodal">Abbrechen</button></div></form>`;
   $('#fNotify').addEventListener('submit', async ev => {
     ev.preventDefault(); const d = formData(ev.target); const btn = $('button[type=submit]', ev.target); btn.disabled = true; btn.textContent = 'Sende…';
     const r = await fnCall('notify', { action: 'send', week_start: ws, mode: d.mode || 'all', text: d.text });
     if (!r.ok) { btn.disabled = false; btn.textContent = 'Jetzt senden'; return toast('Senden fehlgeschlagen: ' + r.error, 6000); }
     closeModal();
-    if (!r.users) return toast('Niemand zu benachrichtigen (keine Betroffenen mit Push).', 5000);
+    if (!r.users) { loadAll(); return toast('Mitteilung gespeichert – sie steht in der App unter „Mitteilungen der Leitung“ (niemand der Empfänger hat Push eingeschaltet).', 7000); }
+    loadAll();
     toast(`Gesendet an ${r.users} Person${r.users === 1 ? '' : 'en'}, ${r.delivered} zugestellt${r.failed ? `, ${r.failed} fehlgeschlagen` : ''}${r.removed ? ` (${r.removed} abgelaufene Geräte entfernt)` : ''}.`, 7000);
   });
 }
@@ -1476,6 +1492,7 @@ document.addEventListener('click', async e => {
   else if (a === 'daynote') { if (isAdmin) openDayNoteEditor(el.dataset.day); }
   else if (a === 'daynotedel') { const { error } = await sb.from('day_notes').delete().eq('day', el.dataset.day); if (error) return toast('Fehlgeschlagen: ' + errMsg(error), 5000); closeModal(); toast('Bemerkung gelöscht'); loadAll(); }
   else if (a === 'reqdone') { if (confirm('Anfrage als erledigt markieren? Sie verschwindet aus der Liste und bleibt im „Anfragen-Archiv…“ (unten im Plan) einsehbar.')) { const { error } = await sb.from('requests').update({ closed_at: new Date().toISOString(), seen_by_admin_at: new Date().toISOString() }).eq('id', +el.dataset.id); if (error) return toast('Fehlgeschlagen: ' + errMsg(error), 5000); toast('Erledigt'); loadAll(); } }
+  else if (a === 'gotoweek') { const d = parseISO(el.dataset.week); weekStart = mondayOf(d); render(); loadAll(); window.scrollTo(0, 0); }
   else if (a === 'reqarchive') { if (isAdmin) openReqArchive(); }
   else if (a === 'reqreopen') { const { error } = await sb.from('requests').update({ closed_at: null }).eq('id', +el.dataset.id); if (error) return toast('Fehlgeschlagen: ' + errMsg(error), 5000); closeModal(); toast('Anfrage wieder offen'); loadAll(); }
   else if (a === 'reqedit') { S.reqEdit = +el.dataset.id; render(); }

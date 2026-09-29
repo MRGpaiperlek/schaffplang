@@ -463,15 +463,16 @@ async function loadAll() {
   try {
     const from = iso(weekStart), to = iso(addDays(weekStart, 6));
     // Admins arbeiten im Entwurf (shifts, day_roles, absences). Mitarbeiter sehen nur die veröffentlichte Fassung (…_published),
-    // und die erst, wenn der Admin die Woche veröffentlicht hat (Eintrag in "weeks").
-    const T = isAdmin ? { shifts: 'shifts', roles: 'day_roles', abs: 'absences' } : { shifts: 'shifts_published', roles: 'day_roles_published', abs: 'absences_published' };
+    // und die erst, wenn der Admin die Woche veröffentlicht hat (Eintrag in "weeks"). Abwesenheiten sehen Mitarbeiter
+    // ausschließlich als Farbe (absences_public) – auch die eigenen; Art und Notiz kennen nur Admins.
+    const T = isAdmin ? { shifts: 'shifts', roles: 'day_roles' } : { shifts: 'shifts_published', roles: 'day_roles_published' };
     const reqs = [
       sb.from('groups').select('*').order('sort_order').order('name'),
       sb.from('employees').select('*').order('sort_order').order('name'),
       sb.from(T.shifts).select('*').gte('day', from).lte('day', to),
       sb.from(T.roles).select('*').gte('day', from).lte('day', to),
       sb.from('settings').select('*'),
-      sb.from(T.abs).select('*').lte('from_day', to).gte('to_day', from),
+      isAdmin ? sb.from('absences').select('*').lte('from_day', to).gte('to_day', from) : Promise.resolve({ data: [], error: null }),
       sb.from('weeks').select('*').eq('week_start', from).maybeSingle(),
     ];
     if (!isAdmin) reqs.push(sb.rpc('absences_public', { p_from: from, p_to: to }));
@@ -570,7 +571,7 @@ async function loadHours() {
   if (a.error || b.error) toast('Fehler beim Laden: ' + errMsg(a.error || b.error), 5000);
   S.hoursShifts = a.data || []; S.hoursAbs = b.data || [];
 }
-async function loadAbsList() { const { data } = await sb.from(isAdmin ? 'absences' : 'absences_published').select('*').gte('to_day', iso(addDays(new Date(), -60))).order('from_day', { ascending: false }); S.absList = data || []; } // Mitarbeiter: nur eigene, veröffentlichte
+async function loadAbsList() { if (!isAdmin) { S.absList = []; return; } const { data } = await sb.from('absences').select('*').gte('to_day', iso(addDays(new Date(), -60))).order('from_day', { ascending: false }); S.absList = data || []; } // Liste nur für Admins
 
 let reloadTimer = null;
 function scheduleReload() { clearTimeout(reloadTimer); reloadTimer = setTimeout(loadAll, 400); }
@@ -579,7 +580,7 @@ function setupRealtime() {
   if (rt && rt._admin === isAdmin) return;
   if (rt) { try { sb.removeChannel(rt); } catch (e) { } rt = null; } // anderer Login (Admin/Mitarbeiter) → Tabellen wechseln
   // Admin: Entwurfstabellen; Mitarbeiter: veröffentlichte Kopien. "weeks" meldet das Veröffentlichen selbst.
-  const tables = isAdmin ? ['settings', 'shifts', 'day_roles', 'absences', 'employees', 'weeks'] : ['settings', 'shifts_published', 'day_roles_published', 'absences_published', 'employees', 'weeks'];
+  const tables = isAdmin ? ['settings', 'shifts', 'day_roles', 'absences', 'employees', 'weeks'] : ['settings', 'shifts_published', 'day_roles_published', 'employees', 'weeks'];
   let ch = sb.channel('plan-live-' + (isAdmin ? 'admin' : 'staff'));
   for (const table of tables) ch = ch.on('postgres_changes', { event: '*', schema: 'public', table }, scheduleReload);
   rt = ch.subscribe(status => { const d = $('#syncdot'); if (d) d.classList.toggle('off', status !== 'SUBSCRIBED'); });
@@ -819,7 +820,7 @@ function renderAbsences() {
   const linked = profile.employee_id ? empById(profile.employee_id) : null;
   let h = `<div class="card"><h2>${isAdmin ? 'Abwesenheiten' : 'Meine Abwesenheiten'} <span class="cnt">(${S.absList.length})</span></h2>`;
   if (isAdmin) h += `<div class="toolbar"><button class="primary" data-action="newabs">+ Neue Abwesenheit</button><select data-action="absfilter"><option value="">Alle Mitarbeiter</option>${S.employees.map(e => `<option value="${e.id}" ${S.absFilter == e.id ? 'selected' : ''}>${esc(e.name)}</option>`).join('')}</select></div>`;
-  else if (!linked) h += `<div class="noteinfo">Dein Login ist noch keinem Namen im Plan zugeordnet. Bitte den Admin darum bitten – dann siehst du hier deine Abwesenheiten und „Meine Woche“.</div>`;
+  else if (!linked) h += `<div class="noteinfo">Dein Login ist noch keinem Namen im Plan zugeordnet. Bitte den Admin darum bitten – dann siehst du „Meine Woche“.</div>`;
   const list = S.absList.filter(a => !S.absFilter || a.employee_id == S.absFilter);
   if (!list.length) h += '<p class="help">Keine Einträge (ab 60 Tage zurück).</p>';
   else {
@@ -827,7 +828,7 @@ function renderAbsences() {
     for (const a of list) { const e = empById(a.employee_id); h += `<tr ${isAdmin ? `data-action="editabs" data-id="${a.id}"` : ''}><td><b>${esc(e ? e.name : '?')}</b></td><td>${fmtDS(a.from_day)}</td><td>${fmtDS(a.to_day)}</td><td><span class="kind kind-${esc(a.kind)}">${esc(KINDS[a.kind] || a.kind)}</span></td><td>${esc(a.note || '')}</td></tr>`; }
     h += '</tbody></table>';
   }
-  return h + '</div>' + (isAdmin ? '<p class="help">Tipp: Auf eine Zeile klicken, um sie zu ändern oder zu löschen. Im Plan sehen Kollegen nur die Farbe (rot = Congé/Krank, orange = Formatioun) – den Grund siehst nur du als Admin und die Person selbst. Sichtbar wird eine Abwesenheit für die Mitarbeiter erst, wenn du die betroffene Woche veröffentlichst.</p>' : '');
+  return h + '</div>' + (isAdmin ? '<p class="help">Tipp: Auf eine Zeile klicken, um sie zu ändern oder zu löschen. Im Plan sehen Mitarbeiter nur die Farbe (rot = Congé/Krank, orange = Formatioun, *** = Fräi) – auch bei sich selbst; Art und Notiz sehen nur Admins. Sichtbar wird eine Abwesenheit für die Mitarbeiter erst, wenn du die betroffene Woche veröffentlichst.</p>' : '');
 }
 
 /* ---------- Mitarbeiter & Gruppen ---------- */

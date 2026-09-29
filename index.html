@@ -169,6 +169,13 @@ table.grid{border-collapse:separate;border-spacing:0;width:100%;font-size:13px}
 table.grid th,table.grid td{border-bottom:1px solid var(--line);border-right:1px solid var(--line);padding:3px 4px;vertical-align:middle}
 table.grid thead th{position:sticky;top:0;background:var(--navy);color:#fff;z-index:3;text-align:center;font-size:14px}
 table.grid thead th small{color:#cfd8e3;display:block;font-weight:400}
+table.grid thead th .dnote{display:block;font-style:normal;font-weight:700;font-size:11.5px;color:#ffd08a;white-space:normal;line-height:1.2;margin-top:1px}
+table.grid thead th[data-action]{cursor:pointer}
+table.grid thead th .dpen{display:block;font-size:10px;color:#9fb3c8;font-weight:400}
+.daytabs button .ddot{display:block;width:6px;height:6px;border-radius:50%;background:var(--orange);margin:2px auto 0}
+.dayhead .dnote{flex-basis:100%;background:#fff7ee;border:1px solid #f5d2b0;border-radius:8px;padding:5px 10px;font-weight:600;color:#7a4b00}
+.dayhead .dnote[data-action]{cursor:pointer}
+.myday .dnote{display:block;font-size:10px;color:#7a4b00;font-weight:700;line-height:1.1;margin-top:2px;overflow-wrap:anywhere}
 table.grid thead th.today{background:var(--blue)}
 table.grid td.today{background:rgba(21,96,130,.06)}
 table.grid .name{position:sticky;left:0;background:#fff;z-index:2;font-weight:600;min-width:120px;max-width:150px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -412,7 +419,7 @@ let lastSeen = null;
 let pendingReq = null; // ?req=ID aus einer Push-Meldung: nach dem Laden zu dieser Anfrage scrollen
 let onlyWorking = false;
 let mobWeek = false; // Handy: Wochenansicht statt Tagesliste
-const S = { groups: [], employees: [], shifts: [], absences: [], absPublic: [], roles: [], settings: {}, profiles: [], users: null, usersErr: '', pushByUser: {}, absList: [], hoursRange: null, hoursShifts: [], hoursAbs: [], week: null, pub: null, requests: [] };
+const S = { groups: [], employees: [], shifts: [], absences: [], absPublic: [], roles: [], settings: {}, profiles: [], users: null, usersErr: '', pushByUser: {}, absList: [], hoursRange: null, hoursShifts: [], hoursAbs: [], week: null, pub: null, requests: [], dayNotes: [] };
 // week = Veröffentlichungs-Eintrag der angezeigten Woche (null = noch nicht veröffentlicht); pub = veröffentlichte Kopie (nur Admin, zum Vergleich mit dem Entwurf)
 
 try { lastSeen = +localStorage.getItem('mr_lastSeen') || null; onlyWorking = localStorage.getItem('mr_onlyWorking') === '1'; mobWeek = localStorage.getItem('mr_mobweek') === '1'; } catch (e) { }
@@ -521,12 +528,14 @@ async function loadAll() {
       isAdmin ? sb.from('absences').select('*').lte('from_day', to).gte('to_day', from) : Promise.resolve({ data: [], error: null }),
       sb.from('weeks').select('*').eq('week_start', from).maybeSingle(),
       sb.from('requests').select('*').is('closed_at', null).order('created_at', { ascending: false }),
+      sb.from(isAdmin ? 'day_notes' : 'day_notes_published').select('*').gte('day', from).lte('day', to),
     ];
     if (!isAdmin) reqs.push(sb.rpc('absences_public', { p_from: from, p_to: to }));
     else reqs.push( // veröffentlichte Kopie zum Vergleich: „seit Veröffentlichung geändert“
       sb.from('shifts_published').select('*').gte('day', from).lte('day', to),
       sb.from('day_roles_published').select('*').gte('day', from).lte('day', to),
-      sb.from('absences_published').select('*').lte('from_day', to).gte('to_day', from));
+      sb.from('absences_published').select('*').lte('from_day', to).gte('to_day', from),
+      sb.from('day_notes_published').select('*').gte('day', from).lte('day', to));
     const res = await Promise.all(reqs);
     const bad = res.find(r => r.error);
     if (bad) { toast('Fehler beim Laden: ' + errMsg(bad.error), 5000); console.error(bad.error); }
@@ -535,9 +544,10 @@ async function loadAll() {
     S.absences = res[5].data || [];
     S.week = res[6].data || null;
     S.requests = res[7].data || [];
-    S.absPublic = isAdmin ? [] : ((res[8] && res[8].data) || []);
-    S.pub = isAdmin ? { shifts: res[8].data || [], roles: res[9].data || [], absences: res[10].data || [], ok: !res[8].error && !res[9].error && !res[10].error } : null;
-    if (!isAdmin && !S.week) { S.shifts = []; S.roles = []; S.absences = []; S.absPublic = []; } // noch nicht veröffentlicht: Mitarbeiter sehen nichts von dieser Woche
+    S.dayNotes = res[8].data || [];
+    S.absPublic = isAdmin ? [] : ((res[9] && res[9].data) || []);
+    S.pub = isAdmin ? { shifts: res[9].data || [], roles: res[10].data || [], absences: res[11].data || [], notes: res[12].data || [], ok: !res[9].error && !res[10].error && !res[11].error && !res[12].error } : null;
+    if (!isAdmin && !S.week) { S.shifts = []; S.roles = []; S.absences = []; S.absPublic = []; S.dayNotes = []; } // noch nicht veröffentlicht: Mitarbeiter sehen nichts von dieser Woche
     if (isAdmin && view === 'logins') await loadProfiles();
     if (view === 'absences') await loadAbsList();
     if (isAdmin && view === 'hours') await loadHours();
@@ -628,7 +638,7 @@ function setupRealtime() {
   if (rt && rt._admin === isAdmin) return;
   if (rt) { try { sb.removeChannel(rt); } catch (e) { } rt = null; } // anderer Login (Admin/Mitarbeiter) → Tabellen wechseln
   // Admin: Entwurfstabellen; Mitarbeiter: veröffentlichte Kopien. "weeks" meldet das Veröffentlichen selbst.
-  const tables = isAdmin ? ['settings', 'shifts', 'day_roles', 'absences', 'employees', 'weeks', 'requests'] : ['settings', 'shifts_published', 'day_roles_published', 'employees', 'weeks', 'requests'];
+  const tables = isAdmin ? ['settings', 'shifts', 'day_roles', 'absences', 'day_notes', 'employees', 'weeks', 'requests'] : ['settings', 'shifts_published', 'day_roles_published', 'day_notes_published', 'employees', 'weeks', 'requests'];
   let ch = sb.channel('plan-live-' + (isAdmin ? 'admin' : 'staff'));
   for (const table of tables) ch = ch.on('postgres_changes', { event: '*', schema: 'public', table }, scheduleReload);
   rt = ch.subscribe(status => { const d = $('#syncdot'); if (d) d.classList.toggle('off', status !== 'SUBSCRIBED'); });
@@ -649,6 +659,7 @@ function absOf(empId, day) {
   if (p) return { employee_id: empId, kind: null, known: false, color: p.color || 'other' };
   return null;
 }
+function dayNote(day) { const n = S.dayNotes.find(x => x.day === day); return n ? n.note : ''; }
 function roleOf(day, role) { const r = S.roles.find(x => x.day === day && x.role === role); return r ? empById(r.employee_id) : null; }
 function hasTimes(s) { return !!(s && ((s.start1 && s.end1) || (s.start2 && s.end2))); }
 function shiftHours(s) { let h = 0; if (s.start1 && s.end1) h += (mins(s.end1) - mins(s.start1)) / 60; if (s.start2 && s.end2) h += (mins(s.end2) - mins(s.start2)) / 60; return Math.max(0, h); }
@@ -742,6 +753,9 @@ function pubDiff() { // Anzahl Einträge, die im Entwurf anders sind als in der 
   const pubA = new Map(S.pub.absences.map(a => [a.src_id, asig(a)])), draftA = new Map(S.absences.map(a => [a.id, asig(a)]));
   for (const [k, v] of draftA) if (pubA.get(k) !== v) n++;
   for (const k of pubA.keys()) if (!draftA.has(k)) n++;
+  const pubN = new Map((S.pub.notes || []).map(x => [x.day, x.note])), draftN = new Map(S.dayNotes.map(x => [x.day, x.note]));
+  for (const [k, v] of draftN) if (pubN.get(k) !== v) n++;
+  for (const k of pubN.keys()) if (!draftN.has(k)) n++;
   return n;
 }
 const fmtTs = ts => { const d = new Date(ts); return `${fmtDY(d)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
@@ -762,7 +776,7 @@ async function publishWeek() {
   if (error) return toast('Veröffentlichen fehlgeschlagen: ' + errMsg(error), 6000);
   const r = data || {};
   await loadAll();
-  openModal(`<h3>Veröffentlicht<small>KW ${kw} · ${r.shifts || 0} Dienste, ${r.roles || 0}× Accueil/Schluss, ${r.absences || 0} Abwesenheit${r.absences === 1 ? '' : 'en'}</small></h3>
+  openModal(`<h3>Veröffentlicht<small>KW ${kw} · ${r.shifts || 0} Dienste, ${r.roles || 0}× Accueil/Schluss, ${r.absences || 0} Abwesenheit${r.absences === 1 ? '' : 'en'}${r.notes ? `, ${r.notes} Tagesbemerkung${r.notes === 1 ? '' : 'en'}` : ''}</small></h3>
     <p class="help">Die Mitarbeiter sehen diese Woche jetzt in ihrem Plan. Sollen sie eine Push-Benachrichtigung bekommen?</p>
     <div class="actions"><button type="button" class="primary" data-action="notify">Benachrichtigen…</button><button type="button" class="ghost" data-action="closemodal">Später</button></div>`);
 }
@@ -802,6 +816,20 @@ async function answerRequest(id, answer, text) {
   fnCall('notify', { action: 'answered', request_id: id }); // Push an die Leitung (im Hintergrund)
   loadAll();
 }
+function openDayNoteEditor(day) {
+  const d = parseISO(day); const cur = dayNote(day);
+  openModal(`<h3>Bemerkung zum Tag<small>${DAY_LONG[(d.getDay() + 6) % 7]}, ${fmtDY(d)}</small></h3><form class="f" id="fDayNote">
+    <div class="frow"><label>Bemerkung</label><input type="text" name="note" maxlength="80" value="${esc(cur)}" placeholder="z. B. Hausversammlung 14:00"></div>
+    <div class="chips"><button type="button" data-fill="note=Hausversammlung">Hausversammlung</button><button type="button" data-fill="note=Schoulfräi">Schoulfräi</button><button type="button" data-fill="note=Feierdag">Feierdag</button><button type="button" data-fill="note=">Leeren</button></div>
+    <p class="help">Steht unter dem Wochentag – in der Tabelle, in der Tagesliste, in „Meine Woche“ und im PDF. Die Mitarbeiter sehen sie nach dem Veröffentlichen der Woche.</p>
+    <div class="actions"><button class="primary" type="submit">Speichern</button><span class="spacer"></span>${cur ? `<button type="button" class="danger" data-action="daynotedel" data-day="${day}">Bemerkung löschen</button>` : ''}<button type="button" class="ghost" data-action="closemodal">Abbrechen</button></div></form>`);
+  $('#fDayNote').addEventListener('submit', async ev => {
+    ev.preventDefault(); const note = formData(ev.target).note;
+    const { error } = note ? await sb.from('day_notes').upsert({ day, note, updated_at: new Date().toISOString() }, { onConflict: 'day' }) : await sb.from('day_notes').delete().eq('day', day);
+    if (error) return toast('Speichern fehlgeschlagen: ' + errMsg(error), 5000);
+    closeModal(); toast('Gespeichert'); loadAll();
+  });
+}
 function openAskEditor(empId, day) {
   const e = empById(empId); const d = day ? parseISO(day) : null;
   const def = d ? `Kannst du am ${DAY_LONG[(d.getDay() + 6) % 7]}, ${fmtDY(d)} länger arbeiten?` : 'Kannst du zusätzlich arbeiten?';
@@ -831,7 +859,7 @@ function renderPlan(D) {
   if (!isAdmin && !S.week) return h + `<div class="pubnote"><h2>Noch nicht veröffentlicht</h2><p>Der Plan für KW ${isoWeek(weekStart)} (${fmtD(weekStart)} – ${fmtDY(addDays(weekStart, D.length - 1))}) ist noch in Arbeit. Sobald der Admin ihn veröffentlicht, erscheint er hier.</p></div>`;
   if (isAdmin) h += renderPubBar() + renderRequestsAdmin() + renderWarnings(D);
   if (selDay >= D.length) selDay = 0;
-  h += `<div class="daytabs">${D.map(d => `<button class="${d.i === selDay ? 'active' : ''} ${d.iso === todayIso() ? 'istoday' : ''}" data-action="selday" data-i="${d.i}">${d.label}<small>${fmtD(d.date)}</small></button>`).join('')}</div>`;
+  h += `<div class="daytabs">${D.map(d => `<button class="${d.i === selDay ? 'active' : ''} ${d.iso === todayIso() ? 'istoday' : ''}" data-action="selday" data-i="${d.i}" title="${esc(dayNote(d.iso))}">${d.label}<small>${fmtD(d.date)}</small>${dayNote(d.iso) ? '<i class="ddot"></i>' : ''}</button>`).join('')}</div>`;
   h += renderMyWeek(D);
   h += `<div class="daylist">${renderDayList(D[selDay], secs)}</div>`;
   h += `<div class="gridwrap"><table class="grid">${renderGrid(D, secs)}</table></div>`;
@@ -845,14 +873,14 @@ function renderMyWeek(D) {
   if (!profile || !profile.employee_id) return '';
   const e = empById(profile.employee_id); if (!e) return '';
   const target = +e.weekly_hours || 0;
-  return `<div class="mycard"><div class="myhead"><span>Meine Woche – ${esc(e.name)}</span>${hoursVisible(e) ? `<small>${fmtH(weekHours(e))} h${target ? ` / ${fmtH(target)} h` : ''}</small>` : ''}</div><div class="mydays">${D.map(d => `<div class="myday ${d.iso === todayIso() ? 'today' : ''}"><b>${d.label}</b><small>${fmtD(d.date)}</small>${cellHtml(e, d)}</div>`).join('')}</div></div>`;
+  return `<div class="mycard"><div class="myhead"><span>Meine Woche – ${esc(e.name)}</span>${hoursVisible(e) ? `<small>${fmtH(weekHours(e))} h${target ? ` / ${fmtH(target)} h` : ''}</small>` : ''}</div><div class="mydays">${D.map(d => `<div class="myday ${d.iso === todayIso() ? 'today' : ''}"><b>${d.label}</b><small>${fmtD(d.date)}</small>${dayNote(d.iso) ? `<span class="dnote">${esc(dayNote(d.iso))}</span>` : ''}${cellHtml(e, d)}</div>`).join('')}</div></div>`;
 }
 
 function renderDayList(d, secs) {
   const acc = roleOf(d.iso, 'accueil'), schl = roleOf(d.iso, 'schluss');
   let h = `<div class="dayhead"><div><b>${d.long}</b> ${fmtDY(d.date)} <small>· ${countWorking(d.iso)} Personen</small></div>
     <div class="roles" ${isAdmin ? `data-action="editroles" data-day="${d.iso}"` : ''}><span>Accueil: <b>${acc ? esc(acc.name) : '–'}</b></span><span>Schluss: <b>${schl ? esc(schl.name) : '–'}</b></span>${isAdmin ? '<span class="pen">✎</span>' : ''}</div>
-    <label class="opts"><input type="checkbox" data-action="onlyworking" ${onlyWorking ? 'checked' : ''}> nur Anwesende</label></div>`;
+    <label class="opts"><input type="checkbox" data-action="onlyworking" ${onlyWorking ? 'checked' : ''}> nur Anwesende</label>${dayNote(d.iso) || isAdmin ? `<div class="dnote" ${isAdmin ? `data-action="daynote" data-day="${d.iso}" title="Bemerkung zum Tag ändern"` : ''}>${dayNote(d.iso) ? `📌 ${esc(dayNote(d.iso))}` : '<span style="color:var(--muted);font-weight:400">Bemerkung zum Tag eintragen… ✎</span>'}</div>` : ''}</div>`;
   for (const { g, emps } of secs) {
     const rows = emps.filter(e => !onlyWorking || hasTimes(shiftOf(e.id, d.iso)) || absOf(e.id, d.iso) || (shiftOf(e.id, d.iso) || {}).note);
     if (!rows.length) continue;
@@ -873,7 +901,7 @@ function roleSelect(day, role, cur) {
 
 function renderGrid(D, secs) {
   const ti = todayIso();
-  let h = `<thead><tr><th class="name">Name</th>${D.map(d => `<th class="${d.iso === ti ? 'today' : ''}">${d.label}<small>${fmtD(d.date)}</small></th>`).join('')}${hoursColumn() ? '<th class="hrs">Std.</th>' : ''}</tr></thead><tbody>`;
+  let h = `<thead><tr><th class="name">Name</th>${D.map(d => `<th class="${d.iso === ti ? 'today' : ''}" ${isAdmin ? `data-action="daynote" data-day="${d.iso}" title="Bemerkung zum Tag eintragen oder ändern"` : ''}>${d.label}<small>${fmtD(d.date)}</small>${dayNote(d.iso) ? `<em class="dnote">${esc(dayNote(d.iso))}</em>` : isAdmin ? '<span class="dpen">+ Bemerkung</span>' : ''}</th>`).join('')}${hoursColumn() ? '<th class="hrs">Std.</th>' : ''}</tr></thead><tbody>`;
   for (const { g, emps } of secs) {
     h += `<tr class="grp" style="--gc:${esc(g.color)}"><td colspan="${D.length + (hoursColumn() ? 2 : 1)}">${esc(g.name)}</td></tr>`;
     for (const e of emps) {
@@ -1130,7 +1158,7 @@ async function exportWeekPdf() {
   const nDiff = pubDiff(); const pubNote = !isAdmin ? '' : !S.week ? 'ENTWURF – noch nicht veröffentlicht · ' : nDiff ? `Entwurf mit ${nDiff} unveröffentlichten Änderung${nDiff === 1 ? '' : 'en'} · ` : '';
   if (pubNote) doc.setTextColor(208, 2, 27);
   doc.text(`${pubNote}Stand: ${fmtDY(now)} ${pad2(now.getHours())}:${pad2(now.getMinutes())}`, 287, 11, { align: 'right' }); doc.setTextColor(0, 0, 0);
-  const head = [['Name', ...D.map(d => `${d.label} ${fmtD(d.date)}`), ...(showH ? ['Std.'] : [])]];
+  const head = [['Name', ...D.map(d => `${d.label} ${fmtD(d.date)}` + (dayNote(d.iso) ? `\n${dayNote(d.iso)}` : '')), ...(showH ? ['Std.'] : [])]];
   const body = [], meta = [];
   for (const { g, emps } of secs) {
     body.push([{ content: g.name, colSpan: nCols }]); meta.push({ type: 'grp', g });
@@ -1437,6 +1465,8 @@ document.addEventListener('click', async e => {
   else if (a === 'copyweek') openCopyWeek();
   else if (a === 'publish') { if (isAdmin) publishWeek(); }
   else if (a === 'ask') { if (isAdmin) openAskEditor(+el.dataset.emp, el.dataset.day || null); }
+  else if (a === 'daynote') { if (isAdmin) openDayNoteEditor(el.dataset.day); }
+  else if (a === 'daynotedel') { const { error } = await sb.from('day_notes').delete().eq('day', el.dataset.day); if (error) return toast('Fehlgeschlagen: ' + errMsg(error), 5000); closeModal(); toast('Bemerkung gelöscht'); loadAll(); }
   else if (a === 'reqdone') { if (confirm('Anfrage als erledigt markieren? Sie verschwindet dann aus der Liste.')) { const { error } = await sb.from('requests').update({ closed_at: new Date().toISOString(), seen_by_admin_at: new Date().toISOString() }).eq('id', +el.dataset.id); if (error) return toast('Fehlgeschlagen: ' + errMsg(error), 5000); toast('Erledigt'); loadAll(); } }
   else if (a === 'reqedit') { S.reqEdit = +el.dataset.id; render(); }
   else if (a === 'reqcancel') { S.reqEdit = null; render(); }

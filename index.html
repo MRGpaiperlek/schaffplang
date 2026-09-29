@@ -31,6 +31,7 @@ a{color:var(--blue)}
 #login{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px 16px;background:linear-gradient(160deg,var(--navy),#1b4a6b)}
 .lbox{background:var(--card);border-radius:16px;padding:26px 22px;width:100%;max-width:380px;box-shadow:0 10px 40px rgba(0,0,0,.25)}
 .lbox h1{margin:0 0 4px;font-size:22px;color:var(--navy)}
+.lbox img.logo{display:block;width:230px;max-width:80%;margin:0 auto 14px}
 .lbox p.sub{margin:0 0 18px;color:var(--muted)}
 .lbox label{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px}
 .lbox input{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:8px;font-size:16px}
@@ -51,6 +52,9 @@ button.icon:active{background:rgba(255,255,255,.15)}
 header{background:var(--navy);color:#fff;position:sticky;top:0;z-index:20;padding-top:env(safe-area-inset-top)}
 .bar{display:flex;align-items:center;justify-content:space-between;padding:8px 10px 6px 14px;gap:8px}
 .bar .title{font-weight:700;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bar .left{display:flex;align-items:center;gap:10px;min-width:0}
+.bar img.hlogo{display:none;height:32px;background:#fff;border-radius:6px;padding:3px 7px;box-sizing:content-box}
+@media(min-width:700px){.bar img.hlogo{display:block}}
 .bar .right{display:flex;align-items:center;gap:2px}
 .tabs{display:flex;gap:4px;padding:0 10px 8px;overflow-x:auto;scrollbar-width:none}
 .tabs::-webkit-scrollbar{display:none}
@@ -233,6 +237,7 @@ form.f .frow>span{font-size:15px}
 <!-- ===== Login ===== -->
 <div id="login" class="hidden">
   <div class="lbox">
+    <img src="logo.png" class="logo" alt="Lënster Päiperlék – service d'éducation et d'accueil">
     <h1>MR Schaffplang</h1>
     <p class="sub">Arbeitsplan – Maison Relais</p>
     <form id="fLogin">
@@ -257,7 +262,7 @@ form.f .frow>span{font-size:15px}
 <div id="main" class="hidden">
   <header>
     <div class="bar">
-      <div class="title" id="title">Schaffplang</div>
+      <div class="left"><img src="logo.png" class="hlogo" alt=""><div class="title" id="title">Schaffplang</div></div>
       <div class="right">
         <button class="icon" id="btnReload" title="Aktualisieren">↻</button>
         <button class="icon" id="btnMenu" title="Menü">☰</button>
@@ -869,6 +874,13 @@ async function loadPdfLibs() {
   if (!(window.jspdf && window.jspdf.jsPDF)) await loadScript(PDF_LIBS[0]);
   if (!window.jspdf.jsPDF.API.autoTable) await loadScript(PDF_LIBS[1]);
 }
+let logoData = null;
+async function loadLogo() { // Logo als Daten-URL für das PDF (einmal laden, dann merken)
+  if (logoData !== null) return logoData;
+  try { const b = await (await fetch('logo.png')).blob(); logoData = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = rej; fr.readAsDataURL(b); }); }
+  catch (e) { logoData = ''; }
+  return logoData;
+}
 function hexRgb(hex) { const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || '').trim()); if (!m) return [229, 231, 235]; const n = parseInt(m[1], 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; }
 const PDF_COL = { red: [208, 2, 27], orange: [233, 113, 50], text: [27, 36, 48], note: [61, 74, 92], acc: [21, 96, 130], schl: [14, 40, 65] };
 const ABS_COL = { urlaub: [[251, 213, 213], [138, 28, 28]], krank: [[251, 213, 213], [138, 28, 28]], formatioun: [[255, 224, 179], [122, 75, 0]], frei: [[229, 231, 235], [75, 85, 99]], sonstiges: [[232, 220, 242], [74, 43, 106]], x: [[232, 220, 242], [74, 43, 106]] };
@@ -900,11 +912,13 @@ async function exportWeekPdf() {
   if (!S.employees.length) return toast('Keine Daten für den PDF-Export.');
   toast('PDF wird erstellt…', 2500);
   try { await loadPdfLibs(); } catch (e) { return toast('PDF-Funktion konnte nicht geladen werden. Internetverbindung prüfen und erneut versuchen.', 6000); }
+  const logo = await loadLogo();
   const { jsPDF } = window.jspdf; const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+  let tx = 10; if (logo) { try { doc.addImage(logo, 'PNG', 10, 3.5, 32, 10.4); tx = 46; } catch (e) { } }
   const D = days(); const secs = sections(); const showH = hoursColumn(); const fs = 7.5; const nCols = 1 + D.length + (showH ? 1 : 0);
   const now = new Date();
   doc.setFont('helvetica', 'bold'); doc.setFontSize(13); doc.setTextColor(14, 40, 65);
-  doc.text(`${S.settings.title || 'Schaffplang'} – KW ${isoWeek(weekStart)} (${fmtD(weekStart)} – ${fmtDY(addDays(weekStart, D.length - 1))})`, 10, 11);
+  doc.text(`${S.settings.title || 'Schaffplang'} – KW ${isoWeek(weekStart)} (${fmtD(weekStart)} – ${fmtDY(addDays(weekStart, D.length - 1))})`, tx, 11);
   doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(110, 110, 110);
   doc.text(`Stand: ${fmtDY(now)} ${pad2(now.getHours())}:${pad2(now.getMinutes())}`, 287, 11, { align: 'right' }); doc.setTextColor(0, 0, 0);
   const head = [['Name', ...D.map(d => `${d.label} ${fmtD(d.date)}`), ...(showH ? ['Std.'] : [])]];
@@ -921,7 +935,7 @@ async function exportWeekPdf() {
   body.push(['Personen', ...D.map(d => String(countWorking(d.iso))), ...(showH ? [''] : [])]); meta.push({ type: 'count' });
   const colStyles = { 0: { cellWidth: 34, fontStyle: 'bold' } }; if (showH) colStyles[D.length + 1] = { cellWidth: 18, halign: 'right', fontStyle: 'bold' };
   doc.autoTable({
-    head, body, startY: 15, margin: { left: 10, right: 10, top: 15, bottom: 10 }, theme: 'grid',
+    head, body, startY: 16, margin: { left: 10, right: 10, top: 16, bottom: 10 }, theme: 'grid',
     styles: { fontSize: fs, cellPadding: 1.2, lineColor: [205, 210, 218], lineWidth: 0.15, valign: 'middle', overflow: 'linebreak', textColor: PDF_COL.text },
     headStyles: { fillColor: [14, 40, 65], textColor: 255, halign: 'center', fontStyle: 'bold' }, columnStyles: colStyles,
     didParseCell: data => {

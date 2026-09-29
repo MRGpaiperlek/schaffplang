@@ -183,6 +183,26 @@ details.warn li.info{color:var(--muted)}
 .pubnote{background:#fff7ee;border:1px solid #f5d2b0;border-radius:var(--radius);padding:16px 14px;margin:6px 0 12px;text-align:center}
 .pubnote h2{margin:0 0 6px;font-size:18px;color:var(--navy)}
 .pubnote p{margin:0;color:#3d4a5c}
+/* Anfragen (Admin fragt eine Person, sie antwortet Ja/Nein) */
+.reqcard{background:#fff;border:1px solid var(--line);border-left:6px solid var(--blue);border-radius:var(--radius);padding:10px 12px;margin-bottom:10px;font-size:14px}
+.reqcard h2{margin:0 0 6px;font-size:16px;color:var(--navy)}
+.reqcard .req{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;padding:8px 0;border-top:1px solid var(--line)}
+.reqcard .req:first-of-type{border-top:0}
+.reqcard .req .q{flex:1;min-width:220px}
+.reqcard .req .q b{color:var(--navy)}
+.reqcard .ans{display:inline-block;border-radius:999px;padding:2px 9px;font-weight:700;font-size:13px}
+.reqcard .ans.open{background:#fff3a3;color:#6b5300}
+.reqcard .ans.ja{background:#d5f2df;color:#1a6b30}
+.reqcard .ans.nein{background:#fbd5d5;color:#8a1c1c}
+.reqcard .req.new{background:#f2faf5;margin:0 -12px;padding-left:12px;padding-right:12px}
+.reqcard form.f{margin-top:6px}
+.reqcard .choice{display:flex;gap:8px;flex-wrap:wrap;margin:6px 0}
+.reqcard .choice label{display:flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:8px;padding:8px 12px;cursor:pointer;font-weight:600}
+.reqcard .choice input:checked+span{text-decoration:underline}
+.reqcard input[type=text]{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:8px;font-size:15px}
+.badge.req{background:#fff3a3;color:#6b5300;border:1px solid #e0b800}
+.badge.req.ja{background:#d5f2df;color:#1a6b30;border-color:#7fcf9a}
+.badge.req.nein{background:#fbd5d5;color:#8a1c1c;border-color:#f1b9b9}
 
 /* ---------- Lists / admin pages ---------- */
 .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:12px;margin-bottom:12px}
@@ -249,7 +269,7 @@ form.f .frow>span{font-size:15px}
   main{padding:14px 16px 40px}
 }
 @media print{
-  header,.daytabs,.daylist,.planactions,details.warn,.mycard,.pubbar,#toast{display:none!important}
+  header,.daytabs,.daylist,.planactions,details.warn,.mycard,.pubbar,.reqcard,#toast{display:none!important}
   body{background:#fff}
   main{padding:0;max-width:none}
   .gridwrap{display:block;max-height:none;overflow:visible;border:0}
@@ -367,8 +387,9 @@ let weekStart = mondayOf(new Date());
 let selDay = Math.min((new Date().getDay() + 6) % 7, 4);
 let view = 'plan';
 let lastSeen = null;
+let pendingReq = null; // ?req=ID aus einer Push-Meldung: nach dem Laden zu dieser Anfrage scrollen
 let onlyWorking = false;
-const S = { groups: [], employees: [], shifts: [], absences: [], absPublic: [], roles: [], settings: {}, profiles: [], users: null, usersErr: '', pushByUser: {}, absList: [], hoursRange: null, hoursShifts: [], hoursAbs: [], week: null, pub: null };
+const S = { groups: [], employees: [], shifts: [], absences: [], absPublic: [], roles: [], settings: {}, profiles: [], users: null, usersErr: '', pushByUser: {}, absList: [], hoursRange: null, hoursShifts: [], hoursAbs: [], week: null, pub: null, requests: [] };
 // week = Veröffentlichungs-Eintrag der angezeigten Woche (null = noch nicht veröffentlicht); pub = veröffentlichte Kopie (nur Admin, zum Vergleich mit dem Entwurf)
 
 try { lastSeen = +localStorage.getItem('mr_lastSeen') || null; onlyWorking = localStorage.getItem('mr_onlyWorking') === '1'; } catch (e) { }
@@ -394,9 +415,10 @@ async function init() {
 /* ?week=JJJJ-MM-TT (aus einer Push-Meldung): zu dieser Woche springen */
 function gotoFromUrl(href, clean) {
   try {
-    const u = new URL(href, location.href); const w = u.searchParams.get('week');
+    const u = new URL(href, location.href); const w = u.searchParams.get('week'); const rq = u.searchParams.get('req');
     if (w && /^\d{4}-\d{2}-\d{2}$/.test(w)) { const d = parseISO(w); if (!isNaN(d)) { weekStart = mondayOf(d); selDay = Math.min(Math.max(0, (d.getDay() + 6) % 7), 4); } }
-    if (clean && w) history.replaceState(null, '', u.pathname);
+    if (rq && /^\d+$/.test(rq)) pendingReq = +rq;
+    if (clean && (w || rq)) history.replaceState(null, '', u.pathname);
   } catch (e) { }
 }
 
@@ -474,6 +496,7 @@ async function loadAll() {
       sb.from('settings').select('*'),
       isAdmin ? sb.from('absences').select('*').lte('from_day', to).gte('to_day', from) : Promise.resolve({ data: [], error: null }),
       sb.from('weeks').select('*').eq('week_start', from).maybeSingle(),
+      sb.from('requests').select('*').is('closed_at', null).order('created_at', { ascending: false }),
     ];
     if (!isAdmin) reqs.push(sb.rpc('absences_public', { p_from: from, p_to: to }));
     else reqs.push( // veröffentlichte Kopie zum Vergleich: „seit Veröffentlichung geändert“
@@ -487,8 +510,9 @@ async function loadAll() {
     S.settings = Object.fromEntries((res[4].data || []).map(r => [r.key, r.value]));
     S.absences = res[5].data || [];
     S.week = res[6].data || null;
-    S.absPublic = isAdmin ? [] : ((res[7] && res[7].data) || []);
-    S.pub = isAdmin ? { shifts: res[7].data || [], roles: res[8].data || [], absences: res[9].data || [], ok: !res[7].error && !res[8].error && !res[9].error } : null;
+    S.requests = res[7].data || [];
+    S.absPublic = isAdmin ? [] : ((res[8] && res[8].data) || []);
+    S.pub = isAdmin ? { shifts: res[8].data || [], roles: res[9].data || [], absences: res[10].data || [], ok: !res[8].error && !res[9].error && !res[10].error } : null;
     if (!isAdmin && !S.week) { S.shifts = []; S.roles = []; S.absences = []; S.absPublic = []; } // noch nicht veröffentlicht: Mitarbeiter sehen nichts von dieser Woche
     if (isAdmin && view === 'logins') await loadProfiles();
     if (view === 'absences') await loadAbsList();
@@ -580,7 +604,7 @@ function setupRealtime() {
   if (rt && rt._admin === isAdmin) return;
   if (rt) { try { sb.removeChannel(rt); } catch (e) { } rt = null; } // anderer Login (Admin/Mitarbeiter) → Tabellen wechseln
   // Admin: Entwurfstabellen; Mitarbeiter: veröffentlichte Kopien. "weeks" meldet das Veröffentlichen selbst.
-  const tables = isAdmin ? ['settings', 'shifts', 'day_roles', 'absences', 'employees', 'weeks'] : ['settings', 'shifts_published', 'day_roles_published', 'employees', 'weeks'];
+  const tables = isAdmin ? ['settings', 'shifts', 'day_roles', 'absences', 'employees', 'weeks', 'requests'] : ['settings', 'shifts_published', 'day_roles_published', 'employees', 'weeks', 'requests'];
   let ch = sb.channel('plan-live-' + (isAdmin ? 'admin' : 'staff'));
   for (const table of tables) ch = ch.on('postgres_changes', { event: '*', schema: 'public', table }, scheduleReload);
   rt = ch.subscribe(status => { const d = $('#syncdot'); if (d) d.classList.toggle('off', status !== 'SUBSCRIBED'); });
@@ -645,6 +669,7 @@ function render() {
   else if (view === 'logins') c.innerHTML = renderLogins();
   else if (view === 'settings') c.innerHTML = renderSettings();
   else if (view === 'hours') c.innerHTML = renderHours();
+  if (pendingReq && view === 'plan') { const el = $('#req-' + pendingReq); if (el) { pendingReq = null; setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50); } }
 }
 
 function cellHtml(emp, d, boxes) {
@@ -666,6 +691,7 @@ function cellHtml(emp, d, boxes) {
   const acc = roleOf(d.iso, 'accueil'), schl = roleOf(d.iso, 'schluss');
   if (acc && acc.id === emp.id) badges.push('<i class="badge acc">Accueil</i>');
   if (schl && schl.id === emp.id) badges.push('<i class="badge schl">Schluss</i>');
+  for (const r of S.requests.filter(x => x.employee_id === emp.id && x.day === d.iso)) badges.push(`<i class="badge req ${r.answer || ''}" title="${esc(r.text)}">${r.answer === 'ja' ? '✓ Ja' : r.answer === 'nein' ? '✗ Nein' : '? Anfrage'}</i>`);
   const act = isAdmin ? `data-action="edit" data-emp="${emp.id}" data-day="${d.iso}"` : '';
   return `<div class="${cls.join(' ')}" ${act}>${inner}${badges.length ? `<div class="badges">${badges.join('')}</div>` : ''}</div>`;
 }
@@ -716,11 +742,69 @@ async function publishWeek() {
     <div class="actions"><button type="button" class="primary" data-action="notify">Benachrichtigen…</button><button type="button" class="ghost" data-action="closemodal">Später</button></div>`);
 }
 
+const reqWhen = r => r.day ? `${DAY_LONG[(parseISO(r.day).getDay() + 6) % 7].slice(0, 2)} ${fmtDS(r.day)}` : 'ohne Datum';
+function renderRequestsAdmin() {
+  if (!S.requests.length) return '';
+  const open = S.requests.filter(r => !r.answer).length, answered = S.requests.length - open;
+  let h = `<div class="reqcard" id="reqcard"><h2>Anfragen <span class="cnt">(${open} offen${answered ? `, ${answered} beantwortet` : ''})</span></h2>`;
+  for (const r of S.requests) {
+    const e = empById(r.employee_id);
+    h += `<div class="req ${r.answer ? 'new' : ''}" id="req-${r.id}"><div class="q"><b>${esc(e ? e.name : '?')}</b> · ${reqWhen(r)}: „${esc(r.text)}“<br><small>gefragt ${fmtTs(r.created_at)}${r.answered_at ? ` · geantwortet ${fmtTs(r.answered_at)}` : ''}</small></div>
+      <span class="ans ${r.answer || 'open'}">${r.answer === 'ja' ? '✓ JA' : r.answer === 'nein' ? '✗ NEIN' : 'noch keine Antwort'}</span>${r.answer_text ? `<span>„${esc(r.answer_text)}“</span>` : ''}
+      <button class="ghost sm" data-action="reqdone" data-id="${r.id}" title="Anfrage aus der Liste nehmen">Erledigt</button></div>`;
+  }
+  return h + '</div>';
+}
+function renderRequestsStaff() {
+  const mine = S.requests.filter(r => profile && r.employee_id === profile.employee_id);
+  if (!mine.length) return '';
+  let h = '';
+  for (const r of mine) {
+    const editing = !r.answer || S.reqEdit === r.id;
+    h += `<div class="reqcard" id="req-${r.id}"><h2>Anfrage von der Leitung <span class="cnt">· ${reqWhen(r)}</span></h2><div class="q" style="font-size:15px">„${esc(r.text)}“</div>`;
+    if (editing) h += `<form class="f fAnswer" data-id="${r.id}"><div class="choice"><label><input type="radio" name="answer" value="ja" ${r.answer === 'ja' ? 'checked' : ''} required><span>Ja</span></label><label><input type="radio" name="answer" value="nein" ${r.answer === 'nein' ? 'checked' : ''}><span>Nein</span></label></div>
+      <input type="text" name="text" maxlength="200" placeholder="Kommentar (optional), z. B. „ja, aber nur bis 18:30“" value="${esc(r.answer_text || '')}">
+      <div class="actions" style="margin-top:8px"><button class="primary" type="submit">Antwort senden</button>${r.answer ? '<button type="button" class="ghost" data-action="reqcancel">Abbrechen</button>' : ''}</div></form>`;
+    else h += `<p style="margin:8px 0 4px">Deine Antwort: <span class="ans ${r.answer}">${r.answer === 'ja' ? '✓ JA' : '✗ NEIN'}</span>${r.answer_text ? ` „${esc(r.answer_text)}“` : ''} <small>(${fmtTs(r.answered_at)})</small></p><div class="actions"><button type="button" class="ghost sm" data-action="reqedit" data-id="${r.id}">Antwort ändern</button></div>`;
+    h += '</div>';
+  }
+  return h;
+}
+async function answerRequest(id, answer, text) {
+  const { error } = await sb.rpc('answer_request', { p_id: id, p_answer: answer, p_text: text || null });
+  if (error) return toast('Antwort konnte nicht gespeichert werden: ' + errMsg(error), 6000);
+  S.reqEdit = null; toast('Antwort gesendet');
+  fnCall('notify', { action: 'answered', request_id: id }); // Push an die Leitung (im Hintergrund)
+  loadAll();
+}
+function openAskEditor(empId, day) {
+  const e = empById(empId); const d = day ? parseISO(day) : null;
+  const def = d ? `Kannst du am ${DAY_LONG[(d.getDay() + 6) % 7]}, ${fmtDY(d)} länger arbeiten?` : 'Kannst du zusätzlich arbeiten?';
+  openModal(`<h3>Anfrage an ${esc(e.name)}<small>${d ? `${DAY_LONG[(d.getDay() + 6) % 7]}, ${fmtDY(d)}` : 'ohne Datum'}</small></h3><form class="f" id="fAsk">
+    <div class="frow"><label>Frage</label><input type="text" name="text" required maxlength="200" value="${esc(def)}"></div>
+    <div class="chips"><button type="button" data-fill="text=${esc(def)}">länger arbeiten?</button>${d ? `<button type="button" data-fill="text=Kannst du am ${DAY_LONG[(d.getDay() + 6) % 7]}, ${fmtDY(d)} bis ${fmtT(S.settings.late_time || '19:00')} bleiben?">bis ${fmtT(S.settings.late_time || '19:00')} bleiben?</button><button type="button" data-fill="text=Kannst du am ${DAY_LONG[(d.getDay() + 6) % 7]}, ${fmtDY(d)} einspringen?">einspringen?</button>` : ''}</div>
+    <p class="help">${esc(e.name)} sieht die Frage in der App und bekommt eine Push-Meldung (falls eingeschaltet). Nur ${esc(e.name)} und Admins sehen die Anfrage. Die Antwort (Ja/Nein + Kommentar) erscheint oben im Plan unter „Anfragen“, dazu eine Push-Meldung an dich.</p>
+    <div class="actions"><button class="primary" type="submit">Anfrage senden</button><button type="button" class="ghost" data-action="closemodal">Abbrechen</button></div></form>`);
+  $('#fAsk').addEventListener('submit', async ev => {
+    ev.preventDefault(); const d2 = formData(ev.target); if (!d2.text) return;
+    const btn = $('button[type=submit]', ev.target); btn.disabled = true; btn.textContent = 'Sende…';
+    const { data, error } = await sb.from('requests').insert({ employee_id: empId, day: day || null, text: d2.text, created_by: session.user.id }).select('id').single();
+    if (error) { btn.disabled = false; btn.textContent = 'Anfrage senden'; return toast('Speichern fehlgeschlagen: ' + errMsg(error), 6000); }
+    closeModal(); loadAll();
+    const r = await fnCall('notify', { action: 'ask', request_id: data.id });
+    if (!r.ok) toast(`Anfrage gespeichert – Push nicht möglich: ${r.error}. ${e.name} sieht die Frage beim nächsten Öffnen der App.`, 8000);
+    else if (!r.has_login) toast(`Anfrage gespeichert. ${e.name} hat noch keinen Login – die Frage ist nur hier sichtbar.`, 8000);
+    else if (!r.has_push) toast(`Anfrage gespeichert. ${e.name} hat Push nicht eingeschaltet und sieht die Frage beim nächsten Öffnen der App.`, 8000);
+    else toast(`Anfrage an ${e.name} gesendet (Push an ${r.devices} Gerät${r.devices === 1 ? '' : 'e'}${r.failed ? `, ${r.failed} fehlgeschlagen` : ''}).`, 6000);
+  });
+}
+
 function renderPlan(D) {
   const secs = sections();
   let h = '';
-  if (!isAdmin && !S.week) return `<div class="pubnote"><h2>Noch nicht veröffentlicht</h2><p>Der Plan für KW ${isoWeek(weekStart)} (${fmtD(weekStart)} – ${fmtDY(addDays(weekStart, D.length - 1))}) ist noch in Arbeit. Sobald der Admin ihn veröffentlicht, erscheint er hier.</p></div>`;
-  if (isAdmin) h += renderPubBar() + renderWarnings(D);
+  if (!isAdmin) h += renderRequestsStaff();
+  if (!isAdmin && !S.week) return h + `<div class="pubnote"><h2>Noch nicht veröffentlicht</h2><p>Der Plan für KW ${isoWeek(weekStart)} (${fmtD(weekStart)} – ${fmtDY(addDays(weekStart, D.length - 1))}) ist noch in Arbeit. Sobald der Admin ihn veröffentlicht, erscheint er hier.</p></div>`;
+  if (isAdmin) h += renderPubBar() + renderRequestsAdmin() + renderWarnings(D);
   if (selDay >= D.length) selDay = 0;
   h += `<div class="daytabs">${D.map(d => `<button class="${d.i === selDay ? 'active' : ''} ${d.iso === todayIso() ? 'istoday' : ''}" data-action="selday" data-i="${d.i}">${d.label}<small>${fmtD(d.date)}</small></button>`).join('')}</div>`;
   h += renderMyWeek(D);
@@ -1093,7 +1177,7 @@ function openShiftEditor(empId, day) {
     </div>
     <div class="frow"><label>Notiz</label><input type="text" name="note" value="${esc(s.note || '')}" placeholder="z. B. PRECOCE, PANDAS, FLAMINGOS"></div>
     <div class="chips"><button type="button" data-fill="note=PRECOCE">PRECOCE</button><button type="button" data-fill="note=PANDAS">PANDAS</button><button type="button" data-fill="note=FLAMINGOS">FLAMINGOS</button><button type="button" data-fill="note=">Notiz löschen</button></div>
-    <div class="actions"><button class="primary" type="submit">Speichern</button><button type="button" class="ghost" data-action="newabs" data-emp="${empId}" data-day="${day}">Abwesenheit…</button><span class="spacer"></span>${s.id && isChanged(s) ? `<button type="button" class="ghost" data-action="unmark" data-id="${s.id}" title="Die gelbe Änderungsmarkierung dieser Zelle entfernen">Gelbe Markierung entfernen</button>` : ''}${s.id ? `<button type="button" class="danger" data-action="clearshift" data-id="${s.id}">Eintrag entfernen</button>` : ''}<button type="button" class="ghost" data-action="closemodal">Abbrechen</button></div>
+    <div class="actions"><button class="primary" type="submit">Speichern</button><button type="button" class="ghost" data-action="newabs" data-emp="${empId}" data-day="${day}">Abwesenheit…</button><button type="button" class="ghost" data-action="ask" data-emp="${empId}" data-day="${day}" title="Frage an diese Person, z. B. ob sie länger arbeiten kann">Anfrage…</button><span class="spacer"></span>${s.id && isChanged(s) ? `<button type="button" class="ghost" data-action="unmark" data-id="${s.id}" title="Die gelbe Änderungsmarkierung dieser Zelle entfernen">Gelbe Markierung entfernen</button>` : ''}${s.id ? `<button type="button" class="danger" data-action="clearshift" data-id="${s.id}">Eintrag entfernen</button>` : ''}<button type="button" class="ghost" data-action="closemodal">Abbrechen</button></div>
   </form>`);
   $('#fShift').addEventListener('submit', async ev => {
     ev.preventDefault(); const d2 = formData(ev.target);
@@ -1326,6 +1410,10 @@ document.addEventListener('click', async e => {
   else if (a === 'delgroup') { if (confirm('Gruppe löschen? Die Mitarbeiter bleiben erhalten (ohne Gruppe).')) { const { error } = await sb.from('groups').delete().eq('id', +el.dataset.id); if (error) return toast('Löschen fehlgeschlagen: ' + errMsg(error), 5000); closeModal(); toast('Gelöscht'); loadAll(); } }
   else if (a === 'copyweek') openCopyWeek();
   else if (a === 'publish') { if (isAdmin) publishWeek(); }
+  else if (a === 'ask') { if (isAdmin) openAskEditor(+el.dataset.emp, el.dataset.day || null); }
+  else if (a === 'reqdone') { if (confirm('Anfrage als erledigt markieren? Sie verschwindet dann aus der Liste.')) { const { error } = await sb.from('requests').update({ closed_at: new Date().toISOString(), seen_by_admin_at: new Date().toISOString() }).eq('id', +el.dataset.id); if (error) return toast('Fehlgeschlagen: ' + errMsg(error), 5000); toast('Erledigt'); loadAll(); } }
+  else if (a === 'reqedit') { S.reqEdit = +el.dataset.id; render(); }
+  else if (a === 'reqcancel') { S.reqEdit = null; render(); }
   else if (a === 'notify') openNotify();
   else if (a === 'clearweek') { if (confirm(`Alle Dienste sowie Accueil/Schluss der KW ${isoWeek(weekStart)} (${fmtD(weekStart)} – ${fmtDY(addDays(weekStart, 6))}) löschen? Abwesenheiten bleiben erhalten. Das kann nicht rückgängig gemacht werden.`)) { const f = iso(weekStart), t = iso(addDays(weekStart, 6)); const d1 = await sb.from('shifts').delete().gte('day', f).lte('day', t); const d2 = await sb.from('day_roles').delete().gte('day', f).lte('day', t); if (d1.error || d2.error) return toast('Löschen fehlgeschlagen: ' + errMsg(d1.error || d2.error), 5000); toast('Woche geleert'); loadAll(); } }
   else if (a === 'hoursrange') { const k = el.dataset.r; if (k === 'week') S.hoursRange = { from: iso(weekStart), to: iso(addDays(weekStart, days().length - 1)) }; else if (k === 'month') S.hoursRange = monthRange(0); else if (k === 'lastmonth') S.hoursRange = monthRange(-1); else if (k === 'nextmonth') S.hoursRange = monthRange(1); loadAll(); }
@@ -1357,6 +1445,7 @@ document.addEventListener('change', async e => {
 });
 
 document.addEventListener('submit', async e => {
+  if (e.target.classList.contains('fAnswer')) { e.preventDefault(); const d = formData(e.target); if (!d.answer) return toast('Bitte Ja oder Nein wählen.'); answerRequest(+e.target.dataset.id, d.answer, d.text); return; }
   if (e.target.id === 'fHours') { e.preventDefault(); const d = formData(e.target); if (!d.from || !d.to || d.to < d.from) return toast('„Bis“ darf nicht vor „Von“ liegen.'); S.hoursRange = { from: d.from, to: d.to }; loadAll(); return; }
   if (e.target.id !== 'fSettings') return;
   e.preventDefault(); const d = formData(e.target);

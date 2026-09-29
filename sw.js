@@ -1,5 +1,5 @@
 // Service Worker: Netz zuerst, bei Offline aus dem Zwischenspeicher; Push-Benachrichtigungen anzeigen
-const CACHE = 'mr-schaffplang-v2';
+const CACHE = 'mr-schaffplang-v3';
 self.addEventListener('install', (e) => { self.skipWaiting(); });
 self.addEventListener('activate', (e) => {
   e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim()));
@@ -9,8 +9,10 @@ self.addEventListener('fetch', (e) => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return; // nur eigene Dateien zwischenspeichern
+  // Die Seite selbst (index.html) immer beim Server nachfragen, damit „Neu laden“ sofort die neue Version bringt
+  const isPage = req.mode === 'navigate' || req.destination === 'document';
   e.respondWith(
-    fetch(req).then(res => {
+    (isPage ? fetch(req.url, { cache: 'no-cache', credentials: 'same-origin' }) : fetch(req)).then(res => {
       if (res && res.ok) { const copy = res.clone(); caches.open(CACHE).then(c => c.put(req, copy)); }
       return res;
     }).catch(() => caches.match(req).then(r => r || caches.match('./')))

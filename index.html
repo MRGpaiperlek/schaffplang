@@ -65,6 +65,26 @@ header{background:var(--navy);color:#fff;position:sticky;top:0;z-index:20;paddin
 .weeknav .wl small{display:block;font-weight:400}
 .weeknav button.nav{background:#fff;border:1px solid var(--line);border-radius:8px;width:38px;height:36px;font-size:18px}
 .weeknav button.today{background:#fff;border:1px solid var(--line);border-radius:8px;height:36px;padding:0 10px;font-size:14px}
+.weeknav button.mobonly{border-color:var(--blue);color:var(--blue);font-weight:600}
+@media(min-width:900px){.weeknav button.mobonly{display:none}}
+/* Wochenansicht am Handy (Tabelle mit seitlichem Scrollen) */
+@media(max-width:899px){
+  body.mobweek .daytabs,body.mobweek .daylist{display:none}
+  body.mobweek .gridwrap{display:block;max-height:calc(100vh - 140px)}
+  body.mobweek table.grid{font-size:11px;width:max-content;min-width:100%}
+  body.mobweek table.grid th:not(.name):not(.hrs),body.mobweek table.grid td:not(.name):not(.hrs){min-width:168px}
+  body.mobweek table.grid td .cell.shift{grid-template-columns:1fr 1fr auto}
+  .weeknav .wl{min-width:0;flex:0 1 170px}
+  .weeknav button.today{padding:0 7px;font-size:13px}
+  body.mobweek table.grid thead th{font-size:12px}
+  body.mobweek table.grid .name{min-width:88px;max-width:110px;font-size:12px}
+  body.mobweek table.grid th,body.mobweek table.grid td{padding:2px 3px}
+  body.mobweek table.grid td .cell{min-height:28px}
+  body.mobweek .cell .blk{min-height:24px;padding:1px}
+  body.mobweek .cell .blk .t{font-size:10.5px}
+  body.mobweek .cell .blk.nt .note{font-size:10px}
+  body.mobweek .rolesel{max-width:110px;font-size:11px}
+}
 .admin-only{display:none}
 body.is-admin .admin-only{display:initial}
 body.is-admin .tabs.admin-only{display:flex}
@@ -105,6 +125,7 @@ main{padding:10px 10px 40px;max-width:1500px;margin:0 auto}
 .grphead{background:var(--gc,#e5e7eb);font-weight:700;padding:6px 12px;color:#1b2430}
 .row{display:flex;align-items:center;gap:8px;padding:6px 12px;border-top:1px solid var(--line)}
 .row .nm{flex:0 0 118px;font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row .nm span{display:inline-block;max-width:100%;border-radius:6px;padding:1px 6px;overflow:hidden;text-overflow:ellipsis}
 .row.me{background:#eef6ff}
 .row .cell{flex:1}
 .row.empty .cell{color:var(--muted)}
@@ -331,6 +352,7 @@ form.f .frow>span{font-size:15px}
       <button class="nav" id="nextWeek" title="Nächste Woche">›</button>
       <button class="today" id="todayWeek">Heute</button>
       <button class="today" id="btnPdf" title="Diese Woche als PDF speichern">PDF</button>
+      <button class="today mobonly" id="btnView" title="Am Handy zwischen Tages- und Wochenansicht wechseln">Woche</button>
     </div>
   </header>
   <main id="content"></main>
@@ -389,10 +411,12 @@ let view = 'plan';
 let lastSeen = null;
 let pendingReq = null; // ?req=ID aus einer Push-Meldung: nach dem Laden zu dieser Anfrage scrollen
 let onlyWorking = false;
+let mobWeek = false; // Handy: Wochenansicht statt Tagesliste
 const S = { groups: [], employees: [], shifts: [], absences: [], absPublic: [], roles: [], settings: {}, profiles: [], users: null, usersErr: '', pushByUser: {}, absList: [], hoursRange: null, hoursShifts: [], hoursAbs: [], week: null, pub: null, requests: [] };
 // week = Veröffentlichungs-Eintrag der angezeigten Woche (null = noch nicht veröffentlicht); pub = veröffentlichte Kopie (nur Admin, zum Vergleich mit dem Entwurf)
 
-try { lastSeen = +localStorage.getItem('mr_lastSeen') || null; onlyWorking = localStorage.getItem('mr_onlyWorking') === '1'; } catch (e) { }
+try { lastSeen = +localStorage.getItem('mr_lastSeen') || null; onlyWorking = localStorage.getItem('mr_onlyWorking') === '1'; mobWeek = localStorage.getItem('mr_mobweek') === '1'; } catch (e) { }
+document.body.classList.toggle('mobweek', mobWeek);
 
 /* ============================================================
    Start / Login
@@ -661,6 +685,7 @@ function render() {
   $('#weekLabel').innerHTML = `KW ${isoWeek(weekStart)}<small>${fmtD(weekStart)} – ${fmtDY(addDays(weekStart, D.length - 1))}</small>`;
   $$('#tabs button').forEach(b => b.classList.toggle('active', b.dataset.view === view));
   $('#weeknav').classList.toggle('hidden', view !== 'plan');
+  $('#btnView').textContent = mobWeek ? 'Tag' : 'Woche';
   if (!isAdmin && view !== 'plan' && view !== 'absences') view = 'plan';
   const c = $('#content');
   if (view === 'plan') c.innerHTML = renderPlan(D);
@@ -834,7 +859,7 @@ function renderDayList(d, secs) {
     h += `<div class="grpcard" style="--gc:${esc(g.color)}"><div class="grphead">${esc(g.name)}</div>`;
     for (const e of rows) {
       const sh = shiftOf(e.id, d.iso); const empty = !hasTimes(sh) && !absOf(e.id, d.iso) && !(sh && sh.note);
-      h += `<div class="row ${profile.employee_id === e.id ? 'me' : ''} ${empty ? 'empty' : ''}"><div class="nm"><span style="${e.color ? `background:${esc(e.color)};border-radius:6px;padding:1px 6px` : ''}">${esc(e.name)}</span></div>${cellHtml(e, d)}</div>`;
+      h += `<div class="row ${profile.employee_id === e.id ? 'me' : ''} ${empty ? 'empty' : ''}"><div class="nm"><span style="background:${esc(e.color || g.color)}">${esc(e.name)}</span></div>${cellHtml(e, d)}</div>`;
     }
     h += '</div>';
   }
@@ -1383,6 +1408,7 @@ $('#nextWeek').addEventListener('click', () => { weekStart = addDays(weekStart, 
 $('#todayWeek').addEventListener('click', () => { weekStart = mondayOf(new Date()); selDay = Math.min((new Date().getDay() + 6) % 7, days().length - 1); render(); loadAll(); });
 $('#btnReload').addEventListener('click', () => { toast('Aktualisiere…', 1200); loadAll(); });
 $('#btnPdf').addEventListener('click', exportWeekPdf);
+$('#btnView').addEventListener('click', () => { mobWeek = !mobWeek; document.body.classList.toggle('mobweek', mobWeek); try { localStorage.setItem('mr_mobweek', mobWeek ? '1' : '0'); } catch (e) { } render(); });
 $('#btnMenu').addEventListener('click', openMenu);
 $('#tabs').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; view = b.dataset.view; render(); loadAll(); });
 $('#modal').addEventListener('click', e => { if (e.target.id === 'modal') closeModal(); });

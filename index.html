@@ -783,10 +783,11 @@ async function publishWeek() {
 
 const reqWhen = r => r.day ? `${DAY_LONG[(parseISO(r.day).getDay() + 6) % 7].slice(0, 2)} ${fmtDS(r.day)}` : 'ohne Datum';
 function renderRequestsAdmin() {
-  if (!S.requests.length) return '';
-  const open = S.requests.filter(r => !r.answer).length, answered = S.requests.length - open;
+  const list = S.requests.filter(r => !(profile && profile.employee_id && r.employee_id === profile.employee_id)); // eigene Anfragen stehen im Antwort-Kasten
+  if (!list.length) return '';
+  const open = list.filter(r => !r.answer).length, answered = list.length - open;
   let h = `<div class="reqcard" id="reqcard"><h2>Anfragen <span class="cnt">(${open} offen${answered ? `, ${answered} beantwortet` : ''})</span></h2>`;
-  for (const r of S.requests) {
+  for (const r of list) {
     const e = empById(r.employee_id);
     h += `<div class="req ${r.answer ? 'new' : ''}" id="req-${r.id}"><div class="q"><b>${esc(e ? e.name : '?')}</b> · ${reqWhen(r)}: „${esc(r.text)}“<br><small>gefragt ${fmtTs(r.created_at)}${r.answered_at ? ` · geantwortet ${fmtTs(r.answered_at)}` : ''}</small></div>
       <span class="ans ${r.answer || 'open'}">${r.answer === 'ja' ? '✓ JA' : r.answer === 'nein' ? '✗ NEIN' : 'noch keine Antwort'}</span>${r.answer_text ? `<span>„${esc(r.answer_text)}“</span>` : ''}
@@ -815,6 +816,13 @@ async function answerRequest(id, answer, text) {
   S.reqEdit = null; toast('Antwort gesendet');
   fnCall('notify', { action: 'answered', request_id: id }); // Push an die Leitung (im Hintergrund)
   loadAll();
+}
+async function openReqArchive() {
+  openModal('<h3>Anfragen-Archiv<small>erledigte Anfragen (neueste zuerst)</small></h3><p class="help" id="arcInfo">Lade…</p>');
+  const { data, error } = await sb.from('requests').select('*').not('closed_at', 'is', null).order('closed_at', { ascending: false }).limit(200);
+  if (error) { $('#arcInfo').innerHTML = `<div class="err">${esc(errMsg(error))}</div>`; return; }
+  const rows = (data || []).map(r => { const e = empById(r.employee_id); return `<tr><td><b>${esc(e ? e.name : '?')}</b></td><td>${reqWhen(r)}</td><td>${esc(r.text)}</td><td>${r.answer === 'ja' ? '✓ JA' : r.answer === 'nein' ? '✗ NEIN' : '–'}${r.answer_text ? ` „${esc(r.answer_text)}“` : ''}</td><td><small>${fmtTs(r.created_at)}${r.answered_at ? '<br>Antw. ' + fmtTs(r.answered_at) : ''}<br>erl. ${fmtTs(r.closed_at)}</small></td><td><button class="ghost sm" data-action="reqreopen" data-id="${r.id}">Wieder öffnen</button></td></tr>`; }).join('');
+  $('#arcInfo').outerHTML = rows ? `<div style="overflow:auto;max-height:60vh"><table class="list"><thead><tr><th>Wer</th><th>Tag</th><th>Frage</th><th>Antwort</th><th>Zeit</th><th></th></tr></thead><tbody>${rows}</tbody></table></div><div class="actions"><button type="button" class="ghost" data-action="closemodal">Schließen</button></div>` : '<p class="help">Noch keine erledigten Anfragen.</p><div class="actions"><button type="button" class="ghost" data-action="closemodal">Schließen</button></div>';
 }
 function openDayNoteEditor(day) {
   const d = parseISO(day); const cur = dayNote(day);
@@ -855,7 +863,7 @@ function openAskEditor(empId, day) {
 function renderPlan(D) {
   const secs = sections();
   let h = '';
-  if (!isAdmin) h += renderRequestsStaff();
+  h += renderRequestsStaff(); // an mich gerichtete Anfragen (auch wenn ich Admin bin)
   if (!isAdmin && !S.week) return h + `<div class="pubnote"><h2>Noch nicht veröffentlicht</h2><p>Der Plan für KW ${isoWeek(weekStart)} (${fmtD(weekStart)} – ${fmtDY(addDays(weekStart, D.length - 1))}) ist noch in Arbeit. Sobald der Admin ihn veröffentlicht, erscheint er hier.</p></div>`;
   if (isAdmin) h += renderPubBar() + renderRequestsAdmin() + renderWarnings(D);
   if (selDay >= D.length) selDay = 0;
@@ -864,7 +872,7 @@ function renderPlan(D) {
   h += `<div class="daylist">${renderDayList(D[selDay], secs)}</div>`;
   h += `<div class="gridwrap"><table class="grid">${renderGrid(D, secs)}</table></div>`;
   h += renderLegend();
-  h += `<div class="planactions admin-only"><button class="ghost" data-action="copyweek">Woche kopieren…</button><button class="ghost" data-action="notify">Benachrichtigen…</button><button class="ghost" data-action="print">Drucken</button><button class="ghost" data-action="unmarkweek">Markierungen dieser Woche entfernen…</button><span style="flex:1"></span><button class="danger" data-action="clearweek">Woche leeren…</button></div>`;
+  h += `<div class="planactions admin-only"><button class="ghost" data-action="copyweek">Woche kopieren…</button><button class="ghost" data-action="notify">Benachrichtigen…</button><button class="ghost" data-action="reqarchive">Anfragen-Archiv…</button><button class="ghost" data-action="print">Drucken</button><button class="ghost" data-action="unmarkweek">Markierungen dieser Woche entfernen…</button><span style="flex:1"></span><button class="danger" data-action="clearweek">Woche leeren…</button></div>`;
   if (!S.employees.length) h += `<div class="card">Noch keine Mitarbeiter angelegt.${isAdmin ? ' Gehe zu „Mitarbeiter“, um zu starten.' : ''}</div>`;
   return h;
 }
@@ -1467,7 +1475,9 @@ document.addEventListener('click', async e => {
   else if (a === 'ask') { if (isAdmin) openAskEditor(+el.dataset.emp, el.dataset.day || null); }
   else if (a === 'daynote') { if (isAdmin) openDayNoteEditor(el.dataset.day); }
   else if (a === 'daynotedel') { const { error } = await sb.from('day_notes').delete().eq('day', el.dataset.day); if (error) return toast('Fehlgeschlagen: ' + errMsg(error), 5000); closeModal(); toast('Bemerkung gelöscht'); loadAll(); }
-  else if (a === 'reqdone') { if (confirm('Anfrage als erledigt markieren? Sie verschwindet dann aus der Liste.')) { const { error } = await sb.from('requests').update({ closed_at: new Date().toISOString(), seen_by_admin_at: new Date().toISOString() }).eq('id', +el.dataset.id); if (error) return toast('Fehlgeschlagen: ' + errMsg(error), 5000); toast('Erledigt'); loadAll(); } }
+  else if (a === 'reqdone') { if (confirm('Anfrage als erledigt markieren? Sie verschwindet aus der Liste und bleibt im „Anfragen-Archiv…“ (unten im Plan) einsehbar.')) { const { error } = await sb.from('requests').update({ closed_at: new Date().toISOString(), seen_by_admin_at: new Date().toISOString() }).eq('id', +el.dataset.id); if (error) return toast('Fehlgeschlagen: ' + errMsg(error), 5000); toast('Erledigt'); loadAll(); } }
+  else if (a === 'reqarchive') { if (isAdmin) openReqArchive(); }
+  else if (a === 'reqreopen') { const { error } = await sb.from('requests').update({ closed_at: null }).eq('id', +el.dataset.id); if (error) return toast('Fehlgeschlagen: ' + errMsg(error), 5000); closeModal(); toast('Anfrage wieder offen'); loadAll(); }
   else if (a === 'reqedit') { S.reqEdit = +el.dataset.id; render(); }
   else if (a === 'reqcancel') { S.reqEdit = null; render(); }
   else if (a === 'notify') openNotify();

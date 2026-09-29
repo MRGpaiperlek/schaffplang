@@ -91,7 +91,6 @@ main{padding:10px 10px 40px;max-width:1500px;margin:0 auto}
 .myday .cell.shift{display:flex;flex-direction:column;gap:1px;padding:2px 0}
 .myday .cell .blk{border:0;background:transparent;padding:0;min-height:auto;overflow:visible}
 .myday .cell .blk:empty{display:none}
-.myday .cell .blk .h{display:none}
 .myday .cell .blk .t{font-size:11.5px}
 .myday .cell .blk.nt.has,.myday .cell.chg .blk{background:transparent}
 .myday .badge{font-size:10px;padding:0 5px}
@@ -128,12 +127,12 @@ main{padding:10px 10px 40px;max-width:1500px;margin:0 auto}
 .cell.abs-sonstiges,.cell.abs-x{background:#e8dcf2;color:#4a2b6a}
 .cell.abs-c-red{background:#f9b4b4}.cell.abs-c-orange{background:#ffd08a}.cell.abs-c-grey{background:#d9dde3}.cell.abs-c-other{background:#dccbea}
 .cell.abs .abslbl{min-height:16px;display:inline-block}
-.cell.shift{display:grid;grid-template-columns:1.05fr 1.05fr .9fr;gap:2px;padding:2px;align-items:stretch}
+.cell.shift{display:grid;grid-template-columns:1fr 1fr auto;gap:2px;padding:2px;align-items:stretch}
 .cell .blk{border:1px solid rgba(0,0,0,.1);border-radius:5px;padding:2px 2px;min-height:30px;background:rgba(255,255,255,.6);display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;overflow:hidden;line-height:1.15}
-.cell .blk .t{font-size:11.5px;white-space:nowrap}
-.cell .blk .h{font-size:10.5px;color:var(--muted);white-space:nowrap}
+.cell .blk .t{font-size:12px;white-space:nowrap}
+.cell .blk.nt{min-width:20px;max-width:110px;padding:2px 5px}
 .cell .blk.nt.has{background:#fff8c6;border-color:#f0dc82}
-.cell .blk .note{font-size:9.5px;font-weight:700;color:#3d4a5c;text-transform:uppercase;letter-spacing:0;overflow-wrap:anywhere}
+.cell .blk .note{font-size:10px;font-weight:700;color:#3d4a5c;text-transform:uppercase;letter-spacing:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
 .cell .badges{grid-column:1/-1;display:flex;gap:4px;justify-content:center;flex-wrap:wrap}
 .cell.chg .blk{background:rgba(255,255,255,.35)}
 .cell.chg .blk.nt.has{background:#fff3a3}
@@ -629,11 +628,10 @@ function cellHtml(emp, d, boxes) {
     if (a.known) { cls.push('abs', 'abs-' + a.kind); inner = `<span class="abslbl">${esc(KINDS[a.kind] || 'Abwesend')}</span>${a.note ? `<small>${esc(a.note)}</small>` : ''}`; }
     else { cls.push('abs', 'abs-c-' + (a.color || 'other')); inner = '<span class="abslbl" title="Abwesend">&nbsp;</span>'; } // Kollegen sehen nur die Farbe
   } else if ((s && (hasTimes(s) || s.note)) || boxes) {
-    // Drei Felder wie in der Excel-Vorlage: Block 1, Block 2 (je mit Stunden), Notiz (mit Tagessumme)
+    // Drei Felder wie in der Excel-Vorlage: Block 1, Block 2, Notiz (Textfeld, Breite nach Inhalt)
     cls.push('shift');
-    const blk = (st, en) => (st && en) ? `<div class="blk"><span class="t"><b class="${timeCls(st, 'start')}">${fmtT(st)}</b>–<b class="${timeCls(en, 'end')}">${fmtT(en)}</b></span><small class="h">${fmtHM(blockHours(st, en))}</small></div>` : '<div class="blk"></div>';
-    const tot = s ? shiftHours(s) : 0;
-    inner = blk(s && s.start1, s && s.end1) + blk(s && s.start2, s && s.end2) + `<div class="blk nt ${s && s.note ? 'has' : ''}">${s && s.note ? `<span class="note">${esc(s.note)}</span>` : ''}${tot ? `<small class="h">= ${fmtHM(tot)}</small>` : ''}</div>`;
+    const blk = (st, en) => (st && en) ? `<div class="blk"><span class="t"><b class="${timeCls(st, 'start')}">${fmtT(st)}</b>–<b class="${timeCls(en, 'end')}">${fmtT(en)}</b></span></div>` : '<div class="blk"></div>';
+    inner = blk(s && s.start1, s && s.end1) + blk(s && s.start2, s && s.end2) + `<div class="blk nt ${s && s.note ? 'has' : ''}">${s && s.note ? `<span class="note">${esc(s.note)}</span>` : ''}</div>`;
     if (s && isChanged(s)) cls.push('chg');
     if (s && isNew(s)) cls.push('new');
   }
@@ -915,9 +913,8 @@ function pdfCellInfo(emp, d) {
   if (a) { const col = a.known ? (ABS_COL[a.kind] || ABS_COL.other) : (ABS_COL[a.color] || ABS_COL.other); const label = a.known ? (KINDS[a.kind] || 'Abwesend') + (a.note ? '\n' + a.note : '') : ''; return { abs: true, absColor: col[0], absText: col[1], text: label, lines }; }
   if (s) {
     const blocks = [[s.start1, s.end1], [s.start2, s.end2]].filter(b => b[0] && b[1]); // Reihenfolge wie eingetragen (Block 1, Block 2)
-    for (const [st, en] of blocks) { const cs = timeCls(st, 'start'), ce = timeCls(en, 'end'); lines.push({ segs: [{ t: fmtT(st), color: cs ? PDF_COL.red : null, bold: true }, { t: '–' }, { t: fmtT(en), color: ce === 'warn' ? PDF_COL.orange : ce ? PDF_COL.red : null, bold: true }, { t: '  ' + fmtHM(blockHours(st, en)), color: [120, 120, 120], small: true }] }); }
+    for (const [st, en] of blocks) { const cs = timeCls(st, 'start'), ce = timeCls(en, 'end'); lines.push({ segs: [{ t: fmtT(st), color: cs ? PDF_COL.red : null, bold: true }, { t: '–' }, { t: fmtT(en), color: ce === 'warn' ? PDF_COL.orange : ce ? PDF_COL.red : null, bold: true }] }); }
     if (s.note) lines.push({ segs: [{ t: String(s.note).toUpperCase(), color: PDF_COL.note, small: true }] });
-    if (blocks.length > 1) lines.push({ segs: [{ t: '= ' + fmtHM(shiftHours(s)), color: [120, 120, 120], small: true }] });
   }
   const acc = roleOf(d.iso, 'accueil'), schl = roleOf(d.iso, 'schluss');
   if (acc && acc.id === emp.id) lines.push({ segs: [{ t: '» Accueil', color: PDF_COL.acc, bold: true, small: true }] });
@@ -1024,7 +1021,7 @@ function openShiftEditor(empId, day) {
   </form>`);
   $('#fShift').addEventListener('submit', async ev => {
     ev.preventDefault(); const d2 = formData(ev.target);
-    const row = { employee_id: empId, day, start1: d2.start1 || null, end1: d2.end1 || null, start2: d2.start2 || null, end2: d2.end2 || null, note: d2.note || null };
+    const row = { employee_id: empId, day, start1: d2.start1 || null, end1: d2.end1 || null, start2: d2.start2 || null, end2: d2.end2 || null, note: d2.note || null, changed_at: new Date().toISOString() }; // Markierung; die Datenbank behält die alte, wenn sich nichts geändert hat
     if ((row.start1 && !row.end1) || (!row.start1 && row.end1) || (row.start2 && !row.end2) || (!row.start2 && row.end2)) return toast('Bitte immer Von UND Bis eintragen.');
     if (row.start1 && mins(row.end1) <= mins(row.start1)) return toast('„Bis“ muss nach „Von“ liegen.');
     if (row.start2 && mins(row.end2) <= mins(row.start2)) return toast('„Bis“ (2. Block) muss nach „Von“ liegen.');
@@ -1110,19 +1107,36 @@ function openGroupEditor(id) {
 }
 
 function openCopyWeek() {
-  const opts = [];
-  for (let k = -8; k <= 8; k++) { if (k === 0) continue; const ws = addDays(weekStart, k * 7); opts.push(`<option value="${iso(ws)}" ${k === -1 ? 'selected' : ''}>KW ${isoWeek(ws)} (${fmtD(ws)} – ${fmtDY(addDays(ws, 6))})</option>`); }
-  openModal(`<h3>Woche kopieren<small>nach KW ${isoWeek(weekStart)} (${fmtD(weekStart)} – ${fmtDY(addDays(weekStart, 6))})</small></h3><form class="f" id="fCopy">
-    <div class="frow"><label>Von Woche</label><select name="src">${opts.join('')}</select></div>
-    <label class="check"><input type="checkbox" name="replace" checked> Vorhandene Einträge dieser Woche vorher löschen</label>
+  const tFrom = iso(weekStart), tTo = iso(addDays(weekStart, 6));
+  const tCount = S.shifts.filter(x => x.day >= tFrom && x.day <= tTo && (x.start1 || x.start2 || x.note)).length;
+  openModal(`<h3>Woche kopieren<small>nach KW ${isoWeek(weekStart)} (${fmtD(weekStart)} – ${fmtDY(addDays(weekStart, 6))})</small></h3><p class="help" id="copyInfo">Lade die Wochen…</p>`);
+  // Dienste pro Woche zählen (±8 Wochen), damit eine leere Vorlage nicht versehentlich gewählt wird
+  (async () => {
+    const a = iso(addDays(weekStart, -8 * 7)), b = iso(addDays(weekStart, 8 * 7 + 6));
+    const { data, error } = await sb.from('shifts').select('day,start1,start2,note').gte('day', a).lte('day', b);
+    if (error) { $('#copyInfo').innerHTML = `<div class="err">Wochen konnten nicht geladen werden: ${esc(errMsg(error))}</div>`; return; }
+    const cnt = {}; for (const x of (data || [])) { if (!(x.start1 || x.start2 || x.note)) continue; const k = iso(mondayOf(parseISO(x.day))); cnt[k] = (cnt[k] || 0) + 1; }
+    const opts = [];
+    for (let k = -8; k <= 8; k++) { if (k === 0) continue; const ws = addDays(weekStart, k * 7); const n = cnt[iso(ws)] || 0; opts.push(`<option value="${iso(ws)}" ${n ? '' : 'disabled'} ${k === -1 && n ? 'selected' : ''}>KW ${isoWeek(ws)} (${fmtD(ws)} – ${fmtDY(addDays(ws, 6))}) – ${n ? n + ' Dienste' : 'leer'}</option>`); }
+    if (!opts.some(o => o.includes('selected'))) { const first = opts.findIndex(o => !o.includes('disabled')); if (first >= 0) opts[first] = opts[first].replace('<option ', '<option selected '); }
+    const any = Object.keys(cnt).some(k => k !== tFrom && cnt[k] > 0);
+    $('#mbox').innerHTML = `<h3>Woche kopieren<small>nach KW ${isoWeek(weekStart)} (${fmtD(weekStart)} – ${fmtDY(addDays(weekStart, 6))})</small></h3><form class="f" id="fCopy">
+    <div class="noteinfo">Kopiert wird <b>von</b> der gewählten Vorlage-Woche <b>in die angezeigte Woche KW ${isoWeek(weekStart)}</b>${tCount ? `, die bereits <b>${tCount} Dienste</b> enthält` : ' (noch leer)'}. Leere Wochen können nicht als Vorlage gewählt werden.</div>
+    <div class="frow"><label>Vorlage (von)</label><select name="src" ${any ? '' : 'disabled'}>${opts.join('')}</select></div>
+    <label class="check"><input type="checkbox" name="replace" ${tCount ? '' : 'checked'}> Einträge in KW ${isoWeek(weekStart)}, die in der Vorlage nicht vorkommen, löschen (Woche komplett ersetzen)</label>
     <label class="check"><input type="checkbox" name="roles" checked> Accueil &amp; Schluss mitkopieren</label>
-    <p class="help">Abwesenheiten werden nicht kopiert.</p>
-    <div class="actions"><button class="primary" type="submit">Kopieren</button><button type="button" class="ghost" data-action="closemodal">Abbrechen</button></div></form>`);
-  $('#fCopy').addEventListener('submit', async ev => {
-    ev.preventDefault(); const f = ev.target; const btn = $('button.primary', f); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Kopiere…';
-    try { await copyWeek(parseISO(f.src.value), f.replace.checked, f.roles.checked); closeModal(); toast('Woche kopiert'); loadAll(); }
-    catch (e) { toast('Kopieren fehlgeschlagen: ' + errMsg(e), 6000); btn.disabled = false; btn.textContent = 'Kopieren'; }
-  });
+    <p class="help">Abwesenheiten werden nicht kopiert. Die Vorlage-Woche bleibt unverändert.</p>
+    ${any ? '' : '<div class="err">In den 8 Wochen davor und danach gibt es keine Woche mit Diensten.</div>'}
+    <div class="actions"><button class="primary" type="submit" ${any ? '' : 'disabled'}>Kopieren</button><button type="button" class="ghost" data-action="closemodal">Abbrechen</button></div></form>`;
+    $('#fCopy').addEventListener('submit', async ev => {
+      ev.preventDefault(); const f = ev.target; const srcIso = f.src.value; const n = cnt[srcIso] || 0;
+      if (!n) return toast('Die gewählte Vorlage-Woche ist leer – nichts zu kopieren.', 5000);
+      if (tCount && !confirm(`KW ${isoWeek(weekStart)} enthält bereits ${tCount} Dienste. ${f.replace.checked ? 'Sie werden durch die Vorlage ersetzt; Einträge, die in der Vorlage nicht vorkommen, werden gelöscht.' : 'Gleiche Tage werden überschrieben, alle anderen Einträge bleiben.'} Fortfahren?`)) return;
+      const btn = $('button.primary', f); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Kopiere…';
+      try { const res = await copyWeek(parseISO(srcIso), f.replace.checked, f.roles.checked); closeModal(); toast(`Woche kopiert: ${res.copied} Dienste${res.removed ? `, ${res.removed} alte Einträge entfernt` : ''}`, 5000); loadAll(); }
+      catch (e) { toast('Kopieren fehlgeschlagen: ' + errMsg(e), 6000); btn.disabled = false; btn.textContent = 'Kopieren'; }
+    });
+  })();
 }
 async function copyWeek(srcStart, replace, withRoles) {
   const sFrom = iso(srcStart), sTo = iso(addDays(srcStart, 6));
@@ -1130,13 +1144,21 @@ async function copyWeek(srcStart, replace, withRoles) {
   const [r1, r2] = await Promise.all([sb.from('shifts').select('*').gte('day', sFrom).lte('day', sTo), sb.from('day_roles').select('*').gte('day', sFrom).lte('day', sTo)]);
   if (r1.error) throw r1.error; if (r2.error) throw r2.error;
   const offset = Math.round((weekStart - srcStart) / 86400000);
-  if (replace) {
-    const d1 = await sb.from('shifts').delete().gte('day', tFrom).lte('day', tTo); if (d1.error) throw d1.error;
-    if (withRoles) { const d2 = await sb.from('day_roles').delete().gte('day', tFrom).lte('day', tTo); if (d2.error) throw d2.error; }
-  }
   const rows = (r1.data || []).filter(s => s.start1 || s.start2 || s.note).map(s => ({ employee_id: s.employee_id, day: iso(addDays(parseISO(s.day), offset)), start1: s.start1, end1: s.end1, start2: s.start2, end2: s.end2, note: s.note, changed_at: null }));
-  if (rows.length) { const u = await sb.from('shifts').upsert(rows, { onConflict: 'employee_id,day' }); if (u.error) throw u.error; }
-  if (withRoles) { const rr = (r2.data || []).filter(r => r.employee_id).map(r => ({ day: iso(addDays(parseISO(r.day), offset)), role: r.role, employee_id: r.employee_id })); if (rr.length) { const u = await sb.from('day_roles').upsert(rr, { onConflict: 'day,role' }); if (u.error) throw u.error; } }
+  if (!rows.length) throw new Error('Die Vorlage-Woche ist leer – nichts zu kopieren. Es wurde nichts verändert.');
+  // Sicherheit: zuerst einfügen, erst danach (bei „ersetzen“) die nicht mehr passenden alten Einträge löschen
+  const u = await sb.from('shifts').upsert(rows, { onConflict: 'employee_id,day' }); if (u.error) throw u.error;
+  const rr = (r2.data || []).filter(r => r.employee_id).map(r => ({ day: iso(addDays(parseISO(r.day), offset)), role: r.role, employee_id: r.employee_id }));
+  if (withRoles && rr.length) { const u2 = await sb.from('day_roles').upsert(rr, { onConflict: 'day,role' }); if (u2.error) throw u2.error; }
+  let removed = 0;
+  if (replace) {
+    const keep = new Set(rows.map(x => x.employee_id + '|' + x.day));
+    const t = await sb.from('shifts').select('id,employee_id,day').gte('day', tFrom).lte('day', tTo); if (t.error) throw t.error;
+    const ids = (t.data || []).filter(x => !keep.has(x.employee_id + '|' + x.day)).map(x => x.id);
+    if (ids.length) { const d1 = await sb.from('shifts').delete().in('id', ids); if (d1.error) throw d1.error; removed = ids.length; }
+    if (withRoles) { const keepR = new Set(rr.map(x => x.day + '|' + x.role)); const tr = await sb.from('day_roles').select('id,day,role').gte('day', tFrom).lte('day', tTo); if (tr.error) throw tr.error; const rids = (tr.data || []).filter(x => !keepR.has(x.day + '|' + x.role)).map(x => x.id); if (rids.length) { const d2 = await sb.from('day_roles').delete().in('id', rids); if (d2.error) throw d2.error; } }
+  }
+  return { copied: rows.length, removed };
 }
 
 /* ---------- Mitarbeiter benachrichtigen (Admin) ---------- */

@@ -234,6 +234,7 @@ details.notices .nnew{background:var(--orange);color:#fff;border-radius:999px;pa
 details.notices ul{list-style:none;margin:8px 0 0;padding:0}
 details.notices li{padding:6px 8px;border-top:1px solid var(--line);cursor:pointer;border-radius:6px}
 details.notices li.new{background:#fff7ee;font-weight:600}
+.cell .anote{flex-basis:100%;grid-column:1/-1;font-size:10.5px;font-style:italic;color:#6b3fa0;background:#f3ecfb;border:1px dashed #c9b3e6;border-radius:4px;padding:1px 5px;text-align:left;line-height:1.25;overflow-wrap:anywhere}
 .badge.req{background:#fff3a3;color:#6b5300;border:1px solid #e0b800}
 .badge.req.ja{background:#d5f2df;color:#1a6b30;border-color:#7fcf9a}
 .badge.req.nein{background:#fbd5d5;color:#8a1c1c;border-color:#f1b9b9}
@@ -425,7 +426,7 @@ let lastSeen = null;
 let pendingReq = null; // ?req=ID aus einer Push-Meldung: nach dem Laden zu dieser Anfrage scrollen
 let onlyWorking = false;
 let mobWeek = false; // Handy: Wochenansicht statt Tagesliste
-const S = { groups: [], employees: [], shifts: [], absences: [], absPublic: [], roles: [], settings: {}, profiles: [], users: null, usersErr: '', pushByUser: {}, absList: [], hoursRange: null, hoursShifts: [], hoursAbs: [], week: null, pub: null, requests: [], dayNotes: [], notices: [] };
+const S = { groups: [], employees: [], shifts: [], absences: [], absPublic: [], roles: [], settings: {}, profiles: [], users: null, usersErr: '', pushByUser: {}, absList: [], hoursRange: null, hoursShifts: [], hoursAbs: [], week: null, pub: null, requests: [], dayNotes: [], notices: [], adminNotes: [] };
 // week = Veröffentlichungs-Eintrag der angezeigten Woche (null = noch nicht veröffentlicht); pub = veröffentlichte Kopie (nur Admin, zum Vergleich mit dem Entwurf)
 
 try { lastSeen = +localStorage.getItem('mr_lastSeen') || null; onlyWorking = localStorage.getItem('mr_onlyWorking') === '1'; mobWeek = localStorage.getItem('mr_mobweek') === '1'; } catch (e) { }
@@ -542,9 +543,11 @@ async function loadAll() {
       sb.from('day_roles_published').select('*').gte('day', from).lte('day', to),
       sb.from('absences_published').select('*').lte('from_day', to).gte('to_day', from),
       sb.from('day_notes_published').select('*').gte('day', from).lte('day', to));
+    const anP = isAdmin ? sb.from('admin_notes').select('*').gte('day', from).lte('day', to) : Promise.resolve({ data: [] }); // Admin-Vermerke (nur Admins)
     const noticesP = sb.from('notifications').select('id,week_start,sent_at,text').order('sent_at', { ascending: false }).limit(5); // letzte 5 Mitteilungen (Mitarbeiter: nur an sie gerichtete)
     const res = await Promise.all(reqs);
     const nres = await noticesP; S.notices = nres.data || [];
+    const anres = await anP; S.adminNotes = anres.data || [];
     const bad = res.find(r => r.error);
     if (bad) { toast('Fehler beim Laden: ' + errMsg(bad.error), 5000); console.error(bad.error); }
     S.groups = res[0].data || []; S.employees = res[1].data || []; S.shifts = res[2].data || []; S.roles = res[3].data || [];
@@ -646,7 +649,7 @@ function setupRealtime() {
   if (rt && rt._admin === isAdmin) return;
   if (rt) { try { sb.removeChannel(rt); } catch (e) { } rt = null; } // anderer Login (Admin/Mitarbeiter) → Tabellen wechseln
   // Admin: Entwurfstabellen; Mitarbeiter: veröffentlichte Kopien. "weeks" meldet das Veröffentlichen selbst.
-  const tables = isAdmin ? ['settings', 'shifts', 'day_roles', 'absences', 'day_notes', 'employees', 'weeks', 'requests'] : ['settings', 'shifts_published', 'day_roles_published', 'day_notes_published', 'employees', 'weeks', 'requests'];
+  const tables = isAdmin ? ['settings', 'shifts', 'day_roles', 'absences', 'day_notes', 'admin_notes', 'employees', 'weeks', 'requests'] : ['settings', 'shifts_published', 'day_roles_published', 'day_notes_published', 'employees', 'weeks', 'requests'];
   let ch = sb.channel('plan-live-' + (isAdmin ? 'admin' : 'staff'));
   for (const table of tables) ch = ch.on('postgres_changes', { event: '*', schema: 'public', table }, scheduleReload);
   rt = ch.subscribe(status => { const d = $('#syncdot'); if (d) d.classList.toggle('off', status !== 'SUBSCRIBED'); });
@@ -667,6 +670,7 @@ function absOf(empId, day) {
   if (p) return { employee_id: empId, kind: null, known: false, color: p.color || 'other' };
   return null;
 }
+function adminNote(empId, day) { const n = isAdmin && S.adminNotes.find(x => x.employee_id === empId && x.day === day); return n ? n.note : ''; }
 function dayNote(day) { const n = S.dayNotes.find(x => x.day === day); return n ? n.note : ''; }
 function roleOf(day, role) { const r = S.roles.find(x => x.day === day && x.role === role); return r ? empById(r.employee_id) : null; }
 function hasTimes(s) { return !!(s && ((s.start1 && s.end1) || (s.start2 && s.end2))); }
@@ -737,7 +741,8 @@ function cellHtml(emp, d, boxes) {
   if (schl && schl.id === emp.id) badges.push('<i class="badge schl">Schluss</i>');
   for (const r of S.requests.filter(x => x.employee_id === emp.id && x.day === d.iso)) badges.push(`<i class="badge req ${r.answer || ''}" title="${esc(r.text)}">${r.answer === 'ja' ? '✓ Ja' : r.answer === 'nein' ? '✗ Nein' : '? Anfrage'}</i>`);
   const act = isAdmin ? `data-action="edit" data-emp="${emp.id}" data-day="${d.iso}"` : '';
-  return `<div class="${cls.join(' ')}" ${act}>${inner}${badges.length ? `<div class="badges">${badges.join('')}</div>` : ''}</div>`;
+  const an = adminNote(emp.id, d.iso);
+  return `<div class="${cls.join(' ')}" ${act}>${inner}${badges.length ? `<div class="badges">${badges.join('')}</div>` : ''}${an ? `<div class="anote" title="Admin-Vermerk – nur für Admins sichtbar">🔒 ${esc(an)}</div>` : ''}</div>`;
 }
 function renderLegend() {
   return `<div class="legend"><span><i class="sw" style="background:#fbd5d5"></i>Congé / Krank</span><span><i class="sw" style="background:#ffe0b3"></i>Formatioun</span><span><b>***</b> = Fräi</span><span><i class="sw" style="background:#e8dcf2"></i>Sonstiges</span><span><i class="sw" style="background:var(--yellow);border-color:#e0b800"></i>geändert (letzte ${+S.settings.change_days || 0} Tage)</span><span><i class="sw" style="background:#fff8c6;border-color:#f0dc82"></i>Notiz</span><span><b style="color:var(--red)">rot</b> = ${fmtT(S.settings.early_time || '07:00')} / ${fmtT(S.settings.late_time || '19:00')}</span>${S.settings.warn_time ? `<span><b style="color:var(--orange)">orange</b> = ${fmtT(S.settings.warn_time)}</span>` : ''}</div>`;
@@ -1253,6 +1258,7 @@ function openShiftEditor(empId, day) {
     </div>
     <div class="frow"><label>Notiz</label><input type="text" name="note" value="${esc(s.note || '')}" placeholder="z. B. PRECOCE, PANDAS, FLAMINGOS"></div>
     <div class="chips"><button type="button" data-fill="note=PRECOCE">PRECOCE</button><button type="button" data-fill="note=PANDAS">PANDAS</button><button type="button" data-fill="note=FLAMINGOS">FLAMINGOS</button><button type="button" data-fill="note=">Notiz löschen</button></div>
+    <div class="frow"><label>🔒 Vermerk</label><input type="text" name="anote" maxlength="120" value="${esc(adminNote(empId, day))}" placeholder="nur für Admins sichtbar, z. B. kann nicht – Arzttermin"></div>
     <div class="actions"><button class="primary" type="submit">Speichern</button><button type="button" class="ghost" data-action="newabs" data-emp="${empId}" data-day="${day}">Abwesenheit…</button><button type="button" class="ghost" data-action="ask" data-emp="${empId}" data-day="${day}" title="Frage an diese Person, z. B. ob sie länger arbeiten kann">Anfrage…</button><span class="spacer"></span>${s.id && isChanged(s) ? `<button type="button" class="ghost" data-action="unmark" data-id="${s.id}" title="Die gelbe Änderungsmarkierung dieser Zelle entfernen">Gelbe Markierung entfernen</button>` : ''}${s.id ? `<button type="button" class="danger" data-action="clearshift" data-id="${s.id}">Eintrag entfernen</button>` : ''}<button type="button" class="ghost" data-action="closemodal">Abbrechen</button></div>
   </form>`);
   $('#fShift').addEventListener('submit', async ev => {
@@ -1261,8 +1267,11 @@ function openShiftEditor(empId, day) {
     if ((row.start1 && !row.end1) || (!row.start1 && row.end1) || (row.start2 && !row.end2) || (!row.start2 && row.end2)) return toast('Bitte immer Von UND Bis eintragen.');
     if (row.start1 && mins(row.end1) <= mins(row.start1)) return toast('„Bis“ muss nach „Von“ liegen.');
     if (row.start2 && mins(row.end2) <= mins(row.start2)) return toast('„Bis“ (2. Block) muss nach „Von“ liegen.');
-    const { error } = await sb.from('shifts').upsert(row, { onConflict: 'employee_id,day' });
-    if (error) return toast('Speichern fehlgeschlagen: ' + errMsg(error), 5000);
+    const sameShift = ['start1', 'end1', 'start2', 'end2'].every(k => (t5(s[k]) || null) === (row[k] || null)) && (s.note || null) === row.note;
+    const onlyNote = (!s.id && !row.start1 && !row.start2 && !row.note) || (s.id && sameShift); // nur Vermerk geändert: Dienst nicht anfassen
+    if (!onlyNote) { const { error } = await sb.from('shifts').upsert(row, { onConflict: 'employee_id,day' }); if (error) return toast('Speichern fehlgeschlagen: ' + errMsg(error), 5000); }
+    const an = d2.anote || '';
+    if (an !== adminNote(empId, day)) { const r2 = an ? await sb.from('admin_notes').upsert({ employee_id: empId, day, note: an, updated_at: new Date().toISOString() }, { onConflict: 'employee_id,day' }) : await sb.from('admin_notes').delete().eq('employee_id', empId).eq('day', day); if (r2.error) return toast('Vermerk nicht gespeichert: ' + errMsg(r2.error), 5000); }
     closeModal(); toast('Gespeichert'); loadAll();
   });
 }

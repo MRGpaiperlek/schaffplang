@@ -234,6 +234,10 @@ details.notices .nnew{background:var(--orange);color:#fff;border-radius:999px;pa
 details.notices ul{list-style:none;margin:8px 0 0;padding:0}
 details.notices li{padding:6px 8px;border-top:1px solid var(--line);cursor:pointer;border-radius:6px}
 details.notices li.new{background:#fff7ee;font-weight:600}
+details.notices li{display:flex;gap:8px;align-items:flex-start}
+details.notices li .ntx{flex:1}
+details.notices .ndel{background:none;border:0;color:var(--muted);font-size:16px;padding:0 4px;cursor:pointer}
+details.notices .nall{margin-top:6px;text-align:right}
 .cell .anote{flex-basis:100%;grid-column:1/-1;font-size:10.5px;font-style:italic;color:#6b3fa0;background:#f3ecfb;border:1px dashed #c9b3e6;border-radius:4px;padding:1px 5px;text-align:left;line-height:1.25;overflow-wrap:anywhere}
 .badge.req{background:#fff3a3;color:#6b5300;border:1px solid #e0b800}
 .badge.req.ja{background:#d5f2df;color:#1a6b30;border-color:#7fcf9a}
@@ -517,9 +521,11 @@ $('#fRegister').addEventListener('submit', async e => {
 /* ============================================================
    Daten laden
    ============================================================ */
+let lastTouch = 0;
+function touchSeen() { if (Date.now() - lastTouch < 120000) return; lastTouch = Date.now(); sb.rpc('touch_last_seen').then(() => { }, () => { }); } // „Zuletzt aktiv“ für die Benutzerliste (höchstens alle 2 Min.)
 async function loadAll() {
   if (loading) { loadAgain = true; return; }
-  loading = true;
+  loading = true; touchSeen();
   try {
     const from = iso(weekStart), to = iso(addDays(weekStart, 6));
     // Admins arbeiten im Entwurf (shifts, day_roles, absences). Mitarbeiter sehen nur die veröffentlichte Fassung (…_published),
@@ -544,7 +550,7 @@ async function loadAll() {
       sb.from('absences_published').select('*').lte('from_day', to).gte('to_day', from),
       sb.from('day_notes_published').select('*').gte('day', from).lte('day', to));
     const anP = isAdmin ? sb.from('admin_notes').select('*').gte('day', from).lte('day', to) : Promise.resolve({ data: [] }); // Admin-Vermerke (nur Admins)
-    const noticesP = sb.from('notifications').select('id,week_start,sent_at,text').order('sent_at', { ascending: false }).limit(5); // letzte 5 Mitteilungen (Mitarbeiter: nur an sie gerichtete)
+    const noticesP = fetchNotices(); // letzte 5 nicht ausgeblendete Mitteilungen (Mitarbeiter: nur an sie gerichtete)
     const res = await Promise.all(reqs);
     const nres = await noticesP; S.notices = nres.data || [];
     const anres = await anP; S.adminNotes = anres.data || [];
@@ -678,6 +684,7 @@ function shiftHours(s) { let h = 0; if (s.start1 && s.end1) h += (mins(s.end1) -
 function weekHours(emp) { return days().reduce((sum, d) => { const s = shiftOf(emp.id, d.iso); if (!s || absOf(emp.id, d.iso)) return sum; return sum + shiftHours(s); }, 0); }
 function changedAt(s) { return s ? (s.changed_at === undefined ? s.updated_at : s.changed_at) : null; } // changed_at = echte inhaltliche Änderung (Admin kann sie „entmarkieren“)
 function isChanged(s) { const cd = +S.settings.change_days; if (!(cd > 0)) return false; const t = changedAt(s); return !!t && (Date.now() - new Date(t).getTime()) < cd * 86400000; }
+function fetchNotices() { return Promise.all([sb.from('notifications').select('id,week_start,sent_at,text').order('sent_at', { ascending: false }).limit(40), sb.from('notification_dismissals').select('notification_id')]).then(([n, d]) => { const hid = new Set((d.data || []).map(x => x.notification_id)); return { data: (n.data || []).filter(x => !hid.has(x.id)).slice(0, 5) }; }); } // letzte 5 nicht ausgeblendete Mitteilungen
 function isNew(s) { const t = changedAt(s); return !!(t && lastSeen && new Date(t).getTime() > lastSeen); }
 const fmtHM = h => { const m = Math.round(Math.max(0, h) * 60); return `${Math.floor(m / 60)}:${pad2(m % 60)}`; };
 function blockHours(st, en) { return st && en ? Math.max(0, (mins(en) - mins(st)) / 60) : 0; }
@@ -798,7 +805,7 @@ function renderNotices() {
   if (!S.notices.length) return '';
   const isNew = n => !!(lastSeen && new Date(n.sent_at).getTime() > lastSeen);
   const nNew = S.notices.filter(isNew).length;
-  return `<details class="notices" ${nNew ? 'open' : ''}><summary>🔔 Mitteilungen der Leitung${nNew ? `<span class="nnew">${nNew} neu</span>` : ` <small>(letzte ${S.notices.length})</small>`}</summary><ul>${S.notices.map(n => `<li class="${isNew(n) ? 'new' : ''}" data-action="gotoweek" data-week="${n.week_start}" title="Diese Woche anzeigen"><small>${fmtTs(n.sent_at)} · KW ${isoWeek(parseISO(n.week_start))}</small><br>${esc(n.text)}</li>`).join('')}</ul></details>`;
+  return `<details class="notices" ${nNew ? 'open' : ''}><summary>🔔 Mitteilungen der Leitung${nNew ? `<span class="nnew">${nNew} neu</span>` : ` <small>(letzte ${S.notices.length})</small>`}</summary><ul>${S.notices.map(n => `<li class="${isNew(n) ? 'new' : ''}" data-action="gotoweek" data-week="${n.week_start}" title="Diese Woche anzeigen"><span class="ntx"><small>${fmtTs(n.sent_at)} · KW ${isoWeek(parseISO(n.week_start))}</small><br>${esc(n.text)}</span><button class="ndel" data-action="ndismiss" data-id="${n.id}" title="Diese Mitteilung bei mir ausblenden">✕</button></li>`).join('')}</ul><div class="nall"><button class="ghost sm" data-action="ndismissall">Alle ausblenden</button></div></details>`;
 }
 const reqWhen = r => r.day ? `${DAY_LONG[(parseISO(r.day).getDay() + 6) % 7].slice(0, 2)} ${fmtDS(r.day)}` : 'ohne Datum';
 function renderRequestsAdmin() {
@@ -1016,14 +1023,14 @@ function renderLogins() {
   let h = `<div class="card"><h2>Logins <span class="cnt">(${S.profiles.length})</span></h2>
   <div class="toolbar"><button class="primary" data-action="newlogin" ${ok ? '' : 'disabled'}>+ Neuer Login</button></div>
   <div class="noteinfo"><b>So bekommen Kollegen Zugang:</b><ol><li>Hier auf „+ Neuer Login“: E-Mail-Adresse der Person, ein Startpasswort und den Namen im Plan eingeben.</li><li>Der Person E-Mail und Startpasswort geben. Sie meldet sich an unter <code class="url">${esc(url)}</code> und ändert das Passwort im Menü ☰.</li><li>Passwort vergessen? Bei der Person auf „Passwort“ klicken und ein neues vergeben.</li><li>Jemand arbeitet nicht mehr hier? „Löschen“ – der Name im Plan und alle Dienste bleiben erhalten.</li></ol>
-  Spalte „Push“: ob die Person Benachrichtigungen eingeschaltet hat (jeder selbst im Menü ☰). Benachrichtigen: im Plan auf „Benachrichtigen…“.
+  Spalte „Zuletzt aktiv“: wann die App bei der Person zuletzt geöffnet war und den Plan geladen hat. Spalte „Push“: ob die Person Benachrichtigungen eingeschaltet hat (jeder selbst im Menü ☰). Benachrichtigen: im Plan auf „Benachrichtigen…“.
   Kollegen können sich auch selbst registrieren, mit dem Einladungscode <b>${esc(S.settings.invite_code || '(kein Code gesetzt – jeder kann sich registrieren)')}</b> (siehe Einstellungen). Danach hier den Login dem Namen im Plan zuordnen.</div>`;
   if (!ok) h += `<div class="err">Die Login-Verwaltung ist gerade nicht erreichbar${S.usersErr ? ': ' + esc(S.usersErr) : ''}. Zuordnen und Admin-Recht funktionieren trotzdem; für Anlegen, Passwort, E-Mail und Löschen bitte später erneut versuchen (↻).</div>`;
-  h += `<table class="list logins"><thead><tr><th>E-Mail (Login)</th><th>Name</th><th>Name im Plan</th><th>Admin</th><th>Letzte Anmeldung</th><th>Push</th><th></th></tr></thead><tbody>`;
+  h += `<table class="list logins"><thead><tr><th>E-Mail (Login)</th><th>Name</th><th>Name im Plan</th><th>Admin</th><th>Letzte Anmeldung</th><th>Zuletzt aktiv</th><th>Push</th><th></th></tr></thead><tbody>`;
   for (const p of S.profiles) {
     const me = p.user_id === session.user.id; const u = S.users && S.users[p.user_id];
     const email = (u && u.email) || (me ? session.user.email : '');
-    h += `<tr><td><b>${esc(email || p.display_name || p.user_id)}</b>${me ? ' <small>(du)</small>' : ''}</td><td>${esc(p.display_name || '')}</td><td><select data-action="linkprofile" data-uid="${p.user_id}"><option value="">– nicht zugeordnet –</option>${S.employees.map(e => `<option value="${e.id}" ${p.employee_id === e.id ? 'selected' : ''}>${esc(e.name)}</option>`).join('')}</select></td><td><input type="checkbox" data-action="setadmin" data-uid="${p.user_id}" ${p.is_admin ? 'checked' : ''} ${me ? 'disabled title="Du kannst dir selbst das Admin-Recht nicht entziehen"' : ''}></td><td>${u ? fmtTs(u.last_sign_in_at) : (ok ? '<span class="muted">kein Login</span>' : '–')}</td><td>${(S.pushByUser || {})[p.user_id] ? 'ja' + ((S.pushByUser[p.user_id] > 1) ? ` (${S.pushByUser[p.user_id]} Geräte)` : '') : '<span class="muted">nein</span>'}</td><td class="acts">${ok ? `<button class="ghost sm" data-action="setpw" data-uid="${p.user_id}">Passwort</button><button class="ghost sm" data-action="setemail" data-uid="${p.user_id}">E-Mail</button><button class="danger sm" data-action="deluser" data-uid="${p.user_id}" ${me ? 'disabled title="Den eigenen Login kann man nicht löschen"' : ''}>Löschen</button>` : ''}</td></tr>`;
+    h += `<tr><td><b>${esc(email || p.display_name || p.user_id)}</b>${me ? ' <small>(du)</small>' : ''}</td><td>${esc(p.display_name || '')}</td><td><select data-action="linkprofile" data-uid="${p.user_id}"><option value="">– nicht zugeordnet –</option>${S.employees.map(e => `<option value="${e.id}" ${p.employee_id === e.id ? 'selected' : ''}>${esc(e.name)}</option>`).join('')}</select></td><td><input type="checkbox" data-action="setadmin" data-uid="${p.user_id}" ${p.is_admin ? 'checked' : ''} ${me ? 'disabled title="Du kannst dir selbst das Admin-Recht nicht entziehen"' : ''}></td><td>${u ? fmtTs(u.last_sign_in_at) : (ok ? '<span class="muted">kein Login</span>' : '–')}</td><td>${p.last_seen_at ? fmtTs(p.last_seen_at) : '<span class="muted">–</span>'}</td><td>${(S.pushByUser || {})[p.user_id] ? 'ja' + ((S.pushByUser[p.user_id] > 1) ? ` (${S.pushByUser[p.user_id]} Geräte)` : '') : '<span class="muted">nein</span>'}</td><td class="acts">${ok ? `<button class="ghost sm" data-action="setpw" data-uid="${p.user_id}">Passwort</button><button class="ghost sm" data-action="setemail" data-uid="${p.user_id}">E-Mail</button><button class="danger sm" data-action="deluser" data-uid="${p.user_id}" ${me ? 'disabled title="Den eigenen Login kann man nicht löschen"' : ''}>Löschen</button>` : ''}</td></tr>`;
   }
   return h + '</tbody></table></div>';
 }
@@ -1501,6 +1508,7 @@ document.addEventListener('click', async e => {
   else if (a === 'daynote') { if (isAdmin) openDayNoteEditor(el.dataset.day); }
   else if (a === 'daynotedel') { const { error } = await sb.from('day_notes').delete().eq('day', el.dataset.day); if (error) return toast('Fehlgeschlagen: ' + errMsg(error), 5000); closeModal(); toast('Bemerkung gelöscht'); loadAll(); }
   else if (a === 'reqdone') { if (confirm('Anfrage als erledigt markieren? Sie verschwindet aus der Liste und bleibt im „Anfragen-Archiv…“ (unten im Plan) einsehbar.')) { const { error } = await sb.from('requests').update({ closed_at: new Date().toISOString(), seen_by_admin_at: new Date().toISOString() }).eq('id', +el.dataset.id); if (error) return toast('Fehlgeschlagen: ' + errMsg(error), 5000); toast('Erledigt'); loadAll(); } }
+  else if (a === 'ndismiss' || a === 'ndismissall') { const ids = a === 'ndismiss' ? [+el.dataset.id] : ((await sb.from('notifications').select('id')).data || []).map(n => n.id); const { error } = await sb.from('notification_dismissals').upsert(ids.map(id => ({ user_id: session.user.id, notification_id: id })), { onConflict: 'user_id,notification_id' }); if (error) return toast('Fehlgeschlagen: ' + errMsg(error), 5000); S.notices = (await fetchNotices()).data || []; render(); toast(ids.length === 1 ? 'Ausgeblendet' : 'Alle ausgeblendet'); }
   else if (a === 'gotoweek') { const d = parseISO(el.dataset.week); weekStart = mondayOf(d); render(); loadAll(); window.scrollTo(0, 0); }
   else if (a === 'reqpurge') {
     const m = +$('#arcAge').value; let q = sb.from('requests').select('id').not('closed_at', 'is', null);
